@@ -56,7 +56,8 @@ void drawRing(int cx, int cy, int radius, float degrees, uint16_t color, int thi
   for (int d = 0; d < (int)degrees; d += 3) {
     float a = (d - 90) * PI / 180.0f;
     for (int t = 0; t < thickness; ++t)
-      gfx->drawPixel(cx + (int)((radius-t)*cosf(a)), cy + (int)((radius-t)*sinf(a)), color);
+      gfx->drawLine(cx + (int)((radius-t)*cosf(a)), cy + (int)((radius-t)*sinf(a)),
+                    cx + (int)((radius-t)*cosf(a+3*PI/180.0f)), cy + (int)((radius-t)*sinf(a+3*PI/180.0f)), color);
   }
 }
 
@@ -107,6 +108,13 @@ void drawContent() {
   }
 }
 
+void updateSettingsTelemetry() {
+  if (!screenReady || selectedTab != 3) return;
+  gfx->fillRect(8, 152, 226, 55, BG);
+  drawText(12, 158, "Heartbeats: " + String(heartbeatCount), WHITE_TEXT);
+  drawText(12, 185, String("Last ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT);
+}
+
 void drawStatus() {
   String status = WiFi.status() != WL_CONNECTED ? "Wi-Fi offline" :
                   client.connected() ? "TCP connected" : "TCP disconnected";
@@ -143,7 +151,7 @@ void handleServerMessage(const String& line) {
   const char* type = doc["type"] | "";
   if (strcmp(type, "ack") == 0) {
     lastAck = millis();
-    if (selectedTab == 3) refreshContent();
+    if (selectedTab == 3) updateSettingsTelemetry();
   } else if (strcmp(type, "news") == 0) {
     outsideTemp = doc["outsideTempF"].is<float>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
     outsideHumidity = doc["outsideHumidity"].is<float>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
@@ -155,8 +163,8 @@ void handleServerMessage(const String& line) {
       haSetpoint = doc["setpointF"].as<float>();
       haveHaInfo = true;
       // Don't overwrite a local adjustment waiting to be transmitted.
-      if (!pendingSetpoint) setpoint = haSetpoint;
-      if (selectedTab == 0 || selectedTab == 1) refreshContent();
+      if (!pendingSetpoint && fabsf(setpoint - haSetpoint) > 0.01f) { setpoint = haSetpoint; if (selectedTab == 0) refreshContent(); }
+      if (selectedTab == 1) refreshContent();
     }
   }
 }
@@ -285,7 +293,7 @@ void loop() {
           ++heartbeatCount;
           if (sendSetpoint) pendingSetpoint = false;
           logMessage("TX: " + payload);
-          if (selectedTab == 3) dirty = true;
+          if (selectedTab == 3) updateSettingsTelemetry();
         }
       }
       while (client.available()) {
@@ -309,6 +317,6 @@ void loop() {
   }
   if (dirty) drawScreen();
   else if (screenReady) drawStatus();
-  if (screenReady && selectedTab == 3 && now - lastDraw >= 1000) refreshContent();
+  if (screenReady && selectedTab == 3 && now - lastDraw >= 1000) { updateSettingsTelemetry(); lastDraw = now; }
   delay(10);
 }
