@@ -36,7 +36,7 @@ bool pendingSetpoint = false, haveHaInfo = false;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
-String lastStatus;
+String lastStatus, lastNewsPayload;
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"ARC Room", "ARC House", "News", "Settings"};
 
@@ -163,6 +163,8 @@ void handleServerMessage(const String& line) {
     lastAck = millis();
     if (selectedTab == 3) updateSettingsTelemetry();
   } else if (strcmp(type, "news") == 0) {
+    if (line == lastNewsPayload) return; // Server sends cached news with each heartbeat.
+    lastNewsPayload = line;
     outsideTemp = doc["outsideTempF"].is<double>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
     outsideHumidity = doc["outsideHumidity"].is<double>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
     forecastText = doc["forecast"] | "Forecast unavailable";
