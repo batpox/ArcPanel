@@ -3,17 +3,13 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using ArcPanel.Server;
 
 const int port = 5000;
 const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
 var setpoints = new ConcurrentDictionary<string, double>();
-// Demonstration data until Home Assistant and external feeds are connected.
-const double demoOutsideTempF = 58.5, demoOutsideHumidity = 63.0;
-string[] demoHeadlines = [
-    "News feed not configured", "Connect a news provider",
-    "Outside weather is demo data", "Home Assistant is not connected"
-];
+using var feeds = new InformationFeeds();
 using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 var listener = new TcpListener(IPAddress.Any, port);
@@ -23,6 +19,7 @@ void Log(string message) =>
 
 try
 {
+    _ = feeds.RunAsync(shutdown.Token, Log);
     listener.Start();
     Log($"ArcPanel server listening on TCP {port}");
     while (!shutdown.IsCancellationRequested)
@@ -94,9 +91,13 @@ async Task HandleClientAsync(TcpClient client)
                     using (var reply = JsonDocument.Parse(response))
                         key = reply.RootElement.GetProperty("roomId").GetString() ??
                               reply.RootElement.GetProperty("deviceId").GetString() ?? "Unassigned";
+                    var data = feeds.Current;
                     var news = JsonSerializer.Serialize(new {
-                        type = "news", outsideTempF = demoOutsideTempF,
-                        outsideHumidity = demoOutsideHumidity, headlines = demoHeadlines
+                        type = "news", schemaVersion = 1, outsideTempF = data.OutsideTempF,
+                        outsideHumidity = data.OutsideHumidity, location = data.Location,
+                        forecast = data.Forecast, alerts = data.Alerts,
+                        headlines = data.Headlines, dow = data.Dow, nasdaq = data.Nasdaq,
+                        weatherUpdated = data.WeatherUpdated, newsUpdated = data.NewsUpdated
                     });
                     var haInfo = JsonSerializer.Serialize(new {
                         type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0)

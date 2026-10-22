@@ -30,11 +30,13 @@ unsigned long lastAck = 0, lastDraw = 0, lastTouch = 0, setpointChangedAt = 0;
 float roomTemp = 70.5f, roomHumidity = 46.0f, setpoint = 70.0f;
 float outsideTemp = NAN, outsideHumidity = NAN;
 String headlines[4] = {"Waiting for news...", "", "", ""};
+String forecastText = "Forecast unavailable", weatherAlert = "", dowText = "--", nasdaqText = "--", weatherLocation = "";
+static constexpr uint8_t BODY_SCALE = 2; // 12px character width; tabs retain scale 1
 bool pendingSetpoint = false, haveHaInfo = false;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
-String lastStatus;
+String lastStatus, lastNewsPayload;
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"ARC Room", "ARC House", "News", "Settings"};
 
@@ -61,6 +63,7 @@ void drawRing(int cx, int cy, int radius, float degrees, uint16_t color, int thi
   }
 }
 
+// Layout is intentionally based on SCREEN_W/SCREEN_H, ready for display profiles.
 String clipped(const String& value, int maxChars) {
   return value.length() <= (unsigned)maxChars ? value : value.substring(0, maxChars);
 }
@@ -78,8 +81,8 @@ void drawContent() {
   gfx->fillRect(0, 47, SCREEN_W, 247, BG);
   if (selectedTab == 0) {
     drawText(10, 56, clipped(roomName, 19), ACCENT, 2);
-    drawText(12, 86, String("Room: ") + String(roomTemp, 1) + " F", WHITE_TEXT);
-    drawText(12, 103, String("Humidity: ") + String(roomHumidity, 0) + "%", WHITE_TEXT);
+    drawText(12, 85, String("Room: ") + String(roomTemp, 1) + " F", WHITE_TEXT, BODY_SCALE);
+    drawText(12, 108, String("RH: ") + String(roomHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
     // Outer ring: setpoint. Inner ring: measured temperature, normalized to 50..85 F.
     drawRing(120, 205, 80, 360, PANEL, 7);
     drawRing(120, 205, 80, 360 * (setpoint - 50) / 35, ACCENT, 7);
@@ -90,20 +93,27 @@ void drawContent() {
     drawText(8, 280, "Tap outer ring to adjust", MUTED);
   } else if (selectedTab == 1) {
     drawText(12, 70, "ARC House", ACCENT, 2);
-    drawText(12, 115, "This is tab ARC House", WHITE_TEXT);
-    if (haveHaInfo) drawText(12, 143, "HA setpoint: " + String(haSetpoint, 1) + " F", WHITE_TEXT);
+    drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
+    if (haveHaInfo) drawText(12, 143, "HA: " + String(haSetpoint, 1) + " F", WHITE_TEXT, BODY_SCALE);
   } else if (selectedTab == 2) {
-    drawText(12, 62, "Outside", ACCENT, 2);
-    drawText(12, 95, isnan(outsideTemp) ? "Temperature: --" : "Temperature: " + String(outsideTemp, 1) + " F", WHITE_TEXT);
-    drawText(12, 114, isnan(outsideHumidity) ? "Humidity: --" : "Humidity: " + String(outsideHumidity, 0) + "%", WHITE_TEXT);
-    drawText(12, 143, "Top news", ACCENT);
-    for (int i = 0; i < 4; ++i) drawText(10, 165 + i * 28, clipped(headlines[i], 35), WHITE_TEXT);
+    drawText(8, 53, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
+    drawText(8, 78, isnan(outsideTemp) ? "Temp: --  RH: --" :
+      "Temp:" + String(outsideTemp, 0) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
+    drawText(8, 103, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
+    if (weatherAlert.length())
+      drawText(8, 126, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
+    else drawText(8, 126, "No active NWS alert", MUTED);
+    drawText(8, 151, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 175, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 200, "National / World", ACCENT);
+    for (int i = 0; i < 4; ++i)
+      drawText(8, 217 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
     drawText(12, 60, "Settings", ACCENT, 2);
-    drawText(12, 98, "RoomId: " + clipped(roomId, 24), WHITE_TEXT);
-    drawText(12, 125, "RoomName: " + clipped(roomName, 23), WHITE_TEXT);
-    drawText(12, 158, "Heartbeats: " + String(heartbeatCount), WHITE_TEXT);
-    drawText(12, 185, String("Last ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT);
+    drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
+    drawText(12, 125, clipped(roomName, 18), WHITE_TEXT, BODY_SCALE);
+    drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
+    drawText(12, 185, String("ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT, BODY_SCALE);
     drawText(12, 212, "Interval: 2 seconds", MUTED);
   }
 }
@@ -111,8 +121,8 @@ void drawContent() {
 void updateSettingsTelemetry() {
   if (!screenReady || selectedTab != 3) return;
   gfx->fillRect(8, 152, 226, 55, BG);
-  drawText(12, 158, "Heartbeats: " + String(heartbeatCount), WHITE_TEXT);
-  drawText(12, 185, String("Last ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT);
+  drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
+  drawText(12, 185, String("ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT, BODY_SCALE);
 }
 
 void drawStatus() {
@@ -153,8 +163,16 @@ void handleServerMessage(const String& line) {
     lastAck = millis();
     if (selectedTab == 3) updateSettingsTelemetry();
   } else if (strcmp(type, "news") == 0) {
+    if (line == lastNewsPayload) return; // Server sends cached news with each heartbeat.
+    lastNewsPayload = line;
     outsideTemp = doc["outsideTempF"].is<double>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
     outsideHumidity = doc["outsideHumidity"].is<double>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
+    forecastText = doc["forecast"] | "Forecast unavailable";
+    weatherLocation = doc["location"] | "Local weather";
+    dowText = doc["dow"] | "Unavailable";
+    nasdaqText = doc["nasdaq"] | "Unavailable";
+    JsonArray alerts = doc["alerts"].as<JsonArray>();
+    weatherAlert = alerts.size() ? alerts[0].as<String>() : "";
     JsonArray stories = doc["headlines"].as<JsonArray>();
     for (int i = 0; i < 4; ++i) headlines[i] = i < stories.size() ? stories[i].as<String>() : "";
     if (selectedTab == 2) refreshContent();
