@@ -88,7 +88,7 @@ async Task HandleClientAsync(TcpClient client)
                 }
                 await writer.WriteLineAsync(response);
                 Log($"TX {endpoint}: {response}");
-                if (response.Contains("\\"requestType\\":\\"heartbeat\\""))
+                if (response.Contains("heartbeat"))
                 {
                     string key;
                     using (var reply = JsonDocument.Parse(response))
