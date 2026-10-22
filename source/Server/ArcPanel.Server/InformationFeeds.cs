@@ -17,7 +17,7 @@ internal sealed class InformationFeeds : IDisposable
         latitude = double.TryParse(Environment.GetEnvironmentVariable("ARC_LATITUDE"), CultureInfo.InvariantCulture, out var lat) ? lat : 41.397;
         longitude = double.TryParse(Environment.GetEnvironmentVariable("ARC_LONGITUDE"), CultureInfo.InvariantCulture, out var lon) ? lon : -79.832;
         locationName = Environment.GetEnvironmentVariable("ARC_LOCATION_NAME") ?? "Franklin, PA";
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("ArcPanel/0.2 (local information display; contact: arcpanel@example.invalid)");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("ArcPanel/0.2 (local information display; contact: https://github.com/batpox/ArcPanel)");
     }
 
     internal sealed record Snapshot
