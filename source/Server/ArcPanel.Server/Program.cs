@@ -7,6 +7,13 @@ using System.Text.Json;
 const int port = 5000;
 const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
+var setpoints = new ConcurrentDictionary<string, double>();
+// Demonstration data until Home Assistant and external feeds are connected.
+const double demoOutsideTempF = 58.5, demoOutsideHumidity = 63.0;
+string[] demoHeadlines = [
+    "News feed not configured", "Connect a news provider",
+    "Outside weather is demo data", "Home Assistant is not connected"
+];
 using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 var listener = new TcpListener(IPAddress.Any, port);
@@ -59,10 +66,19 @@ async Task HandleClientAsync(TcpClient client)
                     var deviceId = root.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
                     if (string.IsNullOrWhiteSpace(deviceId)) throw new JsonException("Missing deviceId");
                     clients[deviceId] = DateTimeOffset.UtcNow;
+                    var roomId = root.TryGetProperty("roomId", out var rid) ? rid.GetString() : null;
+                    if (root.TryGetProperty("setpointF", out var sp) && sp.ValueKind == JsonValueKind.Number &&
+                        sp.TryGetDouble(out var requested) && requested >= 50 && requested <= 85)
+                    {
+                        setpoints[roomId ?? deviceId] = requested;
+                        Log($"Setpoint from {deviceId} ({roomId}): {requested:F1} F");
+                    }
+                    if (root.TryGetProperty("roomTempF", out var rt) && root.TryGetProperty("roomHumidity", out var rh))
+                        Log($"Room telemetry {roomId}: {rt} F, {rh}% humidity");
                     response = JsonSerializer.Serialize(new {
                         type = "ack", deviceId, requestType = type,
                         serverTime = DateTimeOffset.UtcNow.ToString("O"),
-                        roomId = (string?)null, roomName = "Unassigned"
+                        roomId, roomName = roomId ?? "Unassigned"
                     });
                 }
                 catch (JsonException ex)
@@ -72,6 +88,24 @@ async Task HandleClientAsync(TcpClient client)
                 }
                 await writer.WriteLineAsync(response);
                 Log($"TX {endpoint}: {response}");
+                if (response.Contains("\\"requestType\\":\\"heartbeat\\""))
+                {
+                    string key;
+                    using (var reply = JsonDocument.Parse(response))
+                        key = reply.RootElement.GetProperty("roomId").GetString() ??
+                              reply.RootElement.GetProperty("deviceId").GetString() ?? "Unassigned";
+                    var news = JsonSerializer.Serialize(new {
+                        type = "news", outsideTempF = demoOutsideTempF,
+                        outsideHumidity = demoOutsideHumidity, headlines = demoHeadlines
+                    });
+                    var haInfo = JsonSerializer.Serialize(new {
+                        type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0)
+                    });
+                    await writer.WriteLineAsync(news);
+                    await writer.WriteLineAsync(haInfo);
+                    Log($"TX {endpoint}: {news}");
+                    Log($"TX {endpoint}: {haInfo}");
+                }
             }
         }
         catch (OperationCanceledException) { Log($"Timeout or shutdown: {endpoint}"); }
