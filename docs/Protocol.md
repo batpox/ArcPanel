@@ -1,15 +1,24 @@
-# Protocol v0 — learning baseline
+# ARC wire protocol — iteration 1
 
-Transport: TCP port 5000, newline-delimited UTF-8 JSON. One JSON object per line. No encryption or authentication yet: use on a trusted LAN only.
+TCP port 5000, newline-delimited UTF-8 JSON; one JSON object per line.
+Trusted LAN only; no authentication or encryption yet.
 
-Client example:
+Every 2 seconds, the ArcUnit sends:
 ```json
-{"type":"heartbeat","deviceId":"ESP32-001122334455","uptimeMs":12345}
+{"type":"heartbeat","deviceId":"ESP32-001122334455","roomId":"MasterBedroom","uptimeMs":12345,"roomTempF":70.5,"roomHumidity":46}
 ```
+After a user changes the circular setpoint and leaves it untouched for 3 seconds,
+the next heartbeat includes `"setpointF":72.0` (one-shot change notification).
+Fake room temperature/humidity are explicitly demonstration data until SHT40 is wired.
 
-Server reply:
+Server sends three newline-delimited JSON messages per heartbeat:
 ```json
-{"type":"ack","deviceId":"ESP32-001122334455","requestType":"heartbeat","serverTime":"2026-10-21T18:00:00.0000000+00:00","roomId":null,"roomName":"Unassigned"}
+{"type":"ack","deviceId":"ESP32-001122334455","requestType":"heartbeat","serverTime":"2026-10-22T12:00:00Z","roomId":"MasterBedroom","roomName":"MasterBedroom"}
+{"type":"news","outsideTempF":58.5,"outsideHumidity":63,"headlines":["News feed not configured","Connect a news provider","Outside weather is demo data","Home Assistant is not connected"]}
+{"type":"ha-info","roomId":"MasterBedroom","setpointF":70}
 ```
+The server currently provides **demo outside weather and placeholder news**, not live feeds.
+It keeps received setpoints in memory (lost on server restart), not in Home Assistant.
+Do not interpret the displayed setpoint as a live heating control until HA integration exists.
 
-This is an initial connectivity demonstration, **not** the finalized versioned configuration protocol. The client logs replies but does not yet apply room assignments or read the SHT40. Message length is bounded after reading on the server; a future increment will enforce bounds during streaming and add schema validation, heartbeats and configuration revisions. Logs use timestamp prefixes (client uptime seconds.milliseconds; server wall-clock milliseconds with offset).
+Client serial logs use uptime seconds.milliseconds; server logs use wall-clock timestamps.
