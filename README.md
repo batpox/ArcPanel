@@ -37,3 +37,31 @@ The ESP32 display has four touch-selectable tabs in one row: ARC Room, ARC House
 See [development instructions](docs/Development.md), [architecture](docs/Architecture.md), and [protocol](docs/Protocol.md).
 
 License: Apache-2.0.
+
+## Information services and display compatibility
+
+The .NET server now refreshes outside weather (Open-Meteo), local severe-weather alerts
+(National Weather Service), national/world headlines (BBC RSS), and Dow/Nasdaq
+index values (best-effort Stooq quotes) every 15 minutes. It caches successful
+responses and sends them to every connected ArcUnit in the existing `news`
+message. Internet access is required on the **server**, not the ESP32.
+Market data may be delayed or unavailable; this is not a trading feed.
+NWS alerts are advisory only; ARC is not an emergency-warning device.
+
+Default location is approximately Franklin, PA. Override via server environment
+variables `ARC_LATITUDE`, `ARC_LONGITUDE` and `ARC_LOCATION_NAME`.
+The room SHT40 remains separate from outside weather and is not yet read by firmware.
+
+For future displays, keep the network message schema independent of physical
+screen dimensions. The firmware centralizes `SCREEN_W`, `SCREEN_H`, text scaling
+and drawing helpers; larger screens can use a different layout without changing
+the server's wire protocol. The current four tabs deliberately retain compact
+labels on the 240-pixel screen.
+
+### Audio
+
+The current ArcUnit firmware provides **no voice or sound**. The ESP32-S3
+can support audio with appropriate hardware (for example an external I2S
+amplifier/speaker and microphone). Do not assume the existing board has a
+speaker, amplifier or microphone; verify the exact Waveshare revision and
+available GPIOs before selecting accessories.
