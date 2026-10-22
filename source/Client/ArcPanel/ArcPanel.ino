@@ -153,13 +153,13 @@ void handleServerMessage(const String& line) {
     lastAck = millis();
     if (selectedTab == 3) updateSettingsTelemetry();
   } else if (strcmp(type, "news") == 0) {
-    outsideTemp = doc["outsideTempF"].is<float>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
-    outsideHumidity = doc["outsideHumidity"].is<float>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
+    outsideTemp = doc["outsideTempF"].is<double>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
+    outsideHumidity = doc["outsideHumidity"].is<double>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
     JsonArray stories = doc["headlines"].as<JsonArray>();
     for (int i = 0; i < 4; ++i) headlines[i] = i < stories.size() ? stories[i].as<String>() : "";
     if (selectedTab == 2) refreshContent();
   } else if (strcmp(type, "ha-info") == 0) {
-    if (doc["setpointF"].is<float>() || doc["setpointF"].is<int>()) {
+    if (doc["setpointF"].is<double>() || doc["setpointF"].is<int>()) {
       haSetpoint = doc["setpointF"].as<float>();
       haveHaInfo = true;
       // Don't overwrite a local adjustment waiting to be transmitted.
