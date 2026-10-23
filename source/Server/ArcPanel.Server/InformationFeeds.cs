@@ -25,6 +25,7 @@ internal sealed class InformationFeeds : IDisposable
         public double? OutsideTempF { get; init; }
         public double? OutsideHumidity { get; init; }
         public string Forecast { get; init; } = "Forecast unavailable";
+        public string ForecastTicker { get; init; } = "Forecast unavailable";
         public string[] Alerts { get; init; } = [];
         public string[] Headlines { get; init; } = [];
         public string Dow { get; init; } = "Unavailable";
@@ -52,6 +53,7 @@ internal sealed class InformationFeeds : IDisposable
         var current = Current;
         double? temperature = current.OutsideTempF, humidity = current.OutsideHumidity;
         string forecast = current.Forecast;
+        string forecastTicker = current.ForecastTicker;
         var alerts = current.Alerts;
         var headlines = current.Headlines;
         string dow = current.Dow, nasdaq = current.Nasdaq;
@@ -60,7 +62,7 @@ internal sealed class InformationFeeds : IDisposable
 
         try
         {
-            string url = $"https://api.open-meteo.com/v1/forecast?latitude={latitude.ToString(CultureInfo.InvariantCulture)}&longitude={longitude.ToString(CultureInfo.InvariantCulture)}&current=temperature_2m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=America%2FNew_York&forecast_days=2";
+            string url = $"https://api.open-meteo.com/v1/forecast?latitude={latitude.ToString(CultureInfo.InvariantCulture)}&longitude={longitude.ToString(CultureInfo.InvariantCulture)}&current=temperature_2m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=America%2FNew_York&forecast_days=4";
             using var json = JsonDocument.Parse(await http.GetStringAsync(url, token));
             var root = json.RootElement;
             temperature = root.GetProperty("current").GetProperty("temperature_2m").GetDouble();
@@ -70,6 +72,12 @@ internal sealed class InformationFeeds : IDisposable
             var low = daily.GetProperty("temperature_2m_min")[0].GetDouble();
             var rain = daily.GetProperty("precipitation_probability_max")[0].GetInt32();
             forecast = $"Today H:{high:0} L:{low:0} F Rain:{rain}%";
+            var dates = daily.GetProperty("time");
+            var highs = daily.GetProperty("temperature_2m_max");
+            var lows = daily.GetProperty("temperature_2m_min");
+            var rains = daily.GetProperty("precipitation_probability_max");
+            forecastTicker = string.Join("  |  ", Enumerable.Range(0, Math.Min(4, dates.GetArrayLength())).Select(i =>
+                $"{(i == 0 ? "Today" : DateTime.Parse(dates[i].GetString()!, CultureInfo.InvariantCulture).ToString("ddd", CultureInfo.InvariantCulture))}: H{highs[i].GetDouble():0} L{lows[i].GetDouble():0}F Rain {rains[i].GetInt32()}%"));
             weatherUpdated = DateTimeOffset.UtcNow;
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { log($"Weather fetch failed: {ex.Message}"); }
@@ -108,7 +116,7 @@ internal sealed class InformationFeeds : IDisposable
         lock (gate)
             snapshot = new Snapshot {
                 OutsideTempF = temperature, OutsideHumidity = humidity, Forecast = forecast,
-                Alerts = alerts, Headlines = headlines, Dow = dow, Nasdaq = nasdaq,
+                ForecastTicker = forecastTicker, Alerts = alerts, Headlines = headlines, Dow = dow, Nasdaq = nasdaq,
                 Location = locationName, WeatherUpdated = weatherUpdated, NewsUpdated = newsUpdated
             };
         log($"Feeds refreshed: weather={(temperature.HasValue ? "available" : "unavailable")}, alerts={alerts.Length}, headlines={headlines.Length}, Dow={dow}, Nasdaq={nasdaq}");
