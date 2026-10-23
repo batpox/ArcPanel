@@ -103,8 +103,8 @@ internal sealed class InformationFeeds : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException) { log($"RSS fetch failed: {ex.Message}"); }
 
         // Index quotes are best-effort and explicitly marked unavailable when inaccessible.
-        dow = await FetchIndexAsync("^dji", current.Dow, log, token);
-        nasdaq = await FetchIndexAsync("^ndq", current.Nasdaq, log, token);
+        dow = await FetchIndexAsync("^DJI", current.Dow, log, token);
+        nasdaq = await FetchIndexAsync("^IXIC", current.Nasdaq, log, token);
         lock (gate)
             snapshot = new Snapshot {
                 OutsideTempF = temperature, OutsideHumidity = humidity, Forecast = forecast,
@@ -116,17 +116,50 @@ internal sealed class InformationFeeds : IDisposable
 
     private async Task<string> FetchIndexAsync(string symbol, string previous, Action<string> log, CancellationToken token)
     {
+        // Yahoo Finance chart data is an unofficial public endpoint and may rate-limit.
+        // The canonical Nasdaq Composite ticker is ^IXIC (not the Nasdaq-100 ^NDX).
         try
         {
-            string csv = await http.GetStringAsync($"https://stooq.com/q/l/?s={Uri.EscapeDataString(symbol)}&f=sd2t2l&h&e=csv", token);
-            var lines = csv.Trim().Split('\n');
-            if (lines.Length < 2) return previous;
-            var fields = lines[1].Trim().Split(',');
-            if (fields.Length < 4 || !double.TryParse(fields[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
-                return previous;
-            return value.ToString("N0", CultureInfo.InvariantCulture);
+            var uri = $"https://query1.finance.yahoo.com/v8/finance/chart/{Uri.EscapeDataString(symbol)}?interval=1d&range=5d";
+            using var doc = JsonDocument.Parse(await http.GetStringAsync(uri, token));
+            var result = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
+            var meta = result.GetProperty("meta");
+            if (meta.TryGetProperty("regularMarketPrice", out var price) &&
+                price.ValueKind == JsonValueKind.Number && price.TryGetDouble(out double value) &&
+                double.IsFinite(value) && value > 0)
+            {
+                log($"Market quote {symbol} via Yahoo: {value:N2}");
+                return value.ToString("N0", CultureInfo.InvariantCulture);
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { log($"Market quote {symbol} failed: {ex.Message}"); return previous; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log($"Yahoo quote {symbol} unavailable: {ex.Message}; trying Stooq");
+        }
+
+        try
+        {
+            string csv = await http.GetStringAsync(
+                $"https://stooq.com/q/l/?s={Uri.EscapeDataString(symbol.ToLowerInvariant())}&f=sd2t2l&h&e=csv", token);
+            var lines = csv.Trim().Split('\n');
+            if (lines.Length >= 2)
+            {
+                var fields = lines[1].Trim().Split(',');
+                if (fields.Length >= 4 &&
+                    double.TryParse(fields[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) &&
+                    double.IsFinite(value) && value > 0)
+                {
+                    log($"Market quote {symbol} via Stooq: {value:N2}");
+                    return value.ToString("N0", CultureInfo.InvariantCulture);
+                }
+            }
+            log($"Stooq quote {symbol} missing or invalid; retaining prior value");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log($"Stooq quote {symbol} unavailable: {ex.Message}");
+        }
+        return previous;
     }
 
     public void Dispose() => http.Dispose();
