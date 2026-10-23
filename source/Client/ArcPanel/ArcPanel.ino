@@ -118,7 +118,9 @@ void drawTicker(unsigned long now) {
   if (!content.length()) content = "Waiting for information";
   const int glyphWidth = 6; // 1x horizontal, 2x vertical font
   const int totalWidth = content.length() * glyphWidth + SCREEN_W;
-  int offset = ((now - tickerStart) * TICKER_SPEED / 1000UL) % totalWidth;
+  unsigned long elapsed = now - tickerStart;
+  int offset = (((elapsed / 1000UL) % totalWidth) * TICKER_SPEED +
+                ((elapsed % 1000UL) * TICKER_SPEED) / 1000UL) % totalWidth;
   int x = SCREEN_W - offset;
   gfx->fillRect(0, TICKER_Y, SCREEN_W, TICKER_H, PANEL);
   gfx->setTextSize(1, 2);
@@ -293,11 +295,12 @@ void pollTouch(unsigned long now) {
       refreshContent();
     }
   } else if (selectedTab == 0) {
-    // 0.5 F per press; 50..85 F. Only right-hand chevrons adjust setpoint.
+    // Half-degree increments in selected units; wire protocol remains Fahrenheit.
     if (x >= 130 && x <= 225) {
+      float step = temperatureUnits == 'C' ? 0.9f : 0.5f;
       float requested = setpoint;
-      if (y >= 122 && y <= 174) requested += 0.5f;
-      else if (y >= 217 && y <= 270) requested -= 0.5f;
+      if (y >= 122 && y <= 174) requested += step;
+      else if (y >= 217 && y <= 270) requested -= step;
       requested = constrain(requested, 50.0f, 85.0f);
       if (fabsf(requested - setpoint) >= 0.25f) {
         setpoint = requested;
