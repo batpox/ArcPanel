@@ -33,7 +33,7 @@ String headlines[4] = {"Waiting for news...", "", "", ""};
 String forecastText = "Forecast unavailable", weatherAlert = "", dowText = "--", nasdaqText = "--", weatherLocation = "";
 static constexpr uint8_t BODY_SCALE = 2;
 static constexpr int TAB_HEIGHT = 58, TAB_BOTTOM = TAB_HEIGHT + 3; // 61px touch targets
-// // 12px character width; tabs retain scale 1
+// Body text is 12px wide; tabs use 6px-wide, 16px-high glyphs.
 bool pendingSetpoint = false, haveHaInfo = false;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
