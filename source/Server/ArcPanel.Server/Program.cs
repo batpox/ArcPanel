@@ -9,6 +9,7 @@ const int port = 5000;
 const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
 var setpoints = new ConcurrentDictionary<string, double>();
+var temperatureUnits = new ConcurrentDictionary<string, string>();
 using var feeds = new InformationFeeds();
 using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
@@ -63,6 +64,16 @@ async Task HandleClientAsync(TcpClient client)
                     var deviceId = root.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
                     if (string.IsNullOrWhiteSpace(deviceId)) throw new JsonException("Missing deviceId");
                     clients[deviceId] = DateTimeOffset.UtcNow;
+                    if (root.TryGetProperty("temperatureUnits", out var units) && units.ValueKind == JsonValueKind.String)
+                    {
+                        string? requestedUnits = units.GetString();
+                        if (requestedUnits is "F" or "C")
+                        {
+                            if (!temperatureUnits.TryGetValue(deviceId, out var oldUnits) || oldUnits != requestedUnits)
+                                Log($"TemperatureUnits {deviceId}: {requestedUnits}");
+                            temperatureUnits[deviceId] = requestedUnits;
+                        }
+                    }
                     var roomId = root.TryGetProperty("roomId", out var rid) ? rid.GetString() : null;
                     if (root.TryGetProperty("setpointF", out var sp) && sp.ValueKind == JsonValueKind.Number &&
                         sp.TryGetDouble(out var requested) && requested >= 50 && requested <= 85)
@@ -75,7 +86,8 @@ async Task HandleClientAsync(TcpClient client)
                     response = JsonSerializer.Serialize(new {
                         type = "ack", deviceId, requestType = type,
                         serverTime = DateTimeOffset.UtcNow.ToString("O"),
-                        roomId, roomName = roomId ?? "Unassigned"
+                        roomId, roomName = roomId ?? "Unassigned",
+                        temperatureUnits = temperatureUnits.GetOrAdd(deviceId, "F")
                     });
                 }
                 catch (JsonException ex)
@@ -95,12 +107,13 @@ async Task HandleClientAsync(TcpClient client)
                     var news = JsonSerializer.Serialize(new {
                         type = "news", schemaVersion = 1, outsideTempF = data.OutsideTempF,
                         outsideHumidity = data.OutsideHumidity, location = data.Location,
-                        forecast = data.Forecast, alerts = data.Alerts,
+                        forecast = data.Forecast, forecastTicker = data.ForecastTicker, forecastTickerC = data.ForecastTickerC, alerts = data.Alerts,
                         headlines = data.Headlines, dow = data.Dow, nasdaq = data.Nasdaq,
                         weatherUpdated = data.WeatherUpdated, newsUpdated = data.NewsUpdated
                     });
                     var haInfo = JsonSerializer.Serialize(new {
-                        type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0)
+                        type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0),
+                        status = "Not connected", alerts = Array.Empty<string>()
                     });
                     await writer.WriteLineAsync(news);
                     await writer.WriteLineAsync(haInfo);

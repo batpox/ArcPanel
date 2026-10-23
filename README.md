@@ -88,3 +88,21 @@ setpoint on the right. Large up/down chevrons adjust the target in 0.5°F
 increments (50–85°F). The existing 3-second idle debounce and heartbeat
 setpoint reporting are unchanged. Until the SHT40 is wired into the firmware,
 the actual room readings remain simulated.
+
+### Temperature units and information tickers
+
+The Settings tab now has a touch-selectable **TemperatureUnits** preference
+(`F` or `C`). The ArcUnit persists it in ESP32 NVS using Arduino
+`Preferences`, reports it on every heartbeat, and displays actual/setpoint
+and outside temperatures in the selected units. The server records the
+reported unit for each device and echoes it in the ACK. Existing wire
+temperature fields remain Fahrenheit.
+
+The News tab scrolls the next **four days** of forecast highs, lows and
+maximum precipitation probability, using the selected temperature units.
+The House tab scrolls **Home Assistant connection status and alerts**.
+Scrolling happens locally, without a separate network message per frame.
+
+**Important:** HA API connectivity has not been implemented yet. Until it
+is, the House ticker correctly shows `HA: Not connected | Alerts: Unavailable`,
+not simulated HA data. The SHT40 sensor integration also remains pending.
