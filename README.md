@@ -65,3 +65,17 @@ can support audio with appropriate hardware (for example an external I2S
 amplifier/speaker and microphone). Do not assume the existing board has a
 speaker, amplifier or microphone; verify the exact Waveshare revision and
 available GPIOs before selecting accessories.
+
+### Market quotes and tab labels
+
+Dow Jones Industrial Average (`^DJI`) and Nasdaq Composite (`^IXIC`)
+are fetched from Yahoo Finance's unofficial chart endpoint with Stooq as
+a fallback. These public endpoints may throttle or fail; when unavailable,
+the server retains the last successful quote or shows `Unavailable`.
+The Nasdaq Composite is **not** the Nasdaq-100. Values are rounded to whole
+index points and are not guaranteed real-time.
+
+On the 240×320 display, the four top tab targets are now 58 pixels tall
+(previously 40 pixels). Tab lettering uses the built-in narrow/tall
+1× horizontal / 2× vertical text scale so eight-character labels fit
+within the 60-pixel columns without an additional font library.
