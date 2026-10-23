@@ -31,7 +31,9 @@ float roomTemp = 70.5f, roomHumidity = 46.0f, setpoint = 70.0f;
 float outsideTemp = NAN, outsideHumidity = NAN;
 String headlines[4] = {"Waiting for news...", "", "", ""};
 String forecastText = "Forecast unavailable", weatherAlert = "", dowText = "--", nasdaqText = "--", weatherLocation = "";
-static constexpr uint8_t BODY_SCALE = 2; // 12px character width; tabs retain scale 1
+static constexpr uint8_t BODY_SCALE = 2;
+static constexpr int TAB_HEIGHT = 58, TAB_BOTTOM = TAB_HEIGHT + 3; // 61px touch targets
+// // 12px character width; tabs retain scale 1
 bool pendingSetpoint = false, haveHaInfo = false;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
@@ -71,16 +73,20 @@ String clipped(const String& value, int maxChars) {
 void drawTabs() {
   for (int i = 0; i < 4; ++i) {
     int x = i * 60;
-    gfx->fillRoundRect(x + 1, 2, 58, 40, 5, i == selectedTab ? ACCENT : PANEL);
-    drawText(x + 4, 17, clipped(tabNames[i], 8), i == selectedTab ? BG : WHITE_TEXT);
+    gfx->fillRoundRect(x + 1, 2, 58, TAB_HEIGHT, 5, i == selectedTab ? ACCENT : PANEL);
+    // Narrow/tall built-in font: 6px per character, 16px tall (no extra font dependency).
+    gfx->setTextSize(1, 2);
+    gfx->setTextColor(i == selectedTab ? BG : WHITE_TEXT);
+    gfx->setCursor(x + 5, 23);
+    gfx->print(clipped(tabNames[i], 8));
   }
-  gfx->drawFastHLine(0, 45, SCREEN_W, ACCENT);
+  gfx->drawFastHLine(0, TAB_BOTTOM, SCREEN_W, ACCENT);
 }
 
 void drawContent() {
-  gfx->fillRect(0, 47, SCREEN_W, 247, BG);
+  gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
-    drawText(10, 56, clipped(roomName, 19), ACCENT, 2);
+    drawText(10, 66, clipped(roomName, 19), ACCENT, 2);
     drawText(12, 85, String("Room: ") + String(roomTemp, 1) + " F", WHITE_TEXT, BODY_SCALE);
     drawText(12, 108, String("RH: ") + String(roomHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
     // Outer ring: setpoint. Inner ring: measured temperature, normalized to 50..85 F.
@@ -96,10 +102,10 @@ void drawContent() {
     drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
     if (haveHaInfo) drawText(12, 143, "HA: " + String(haSetpoint, 1) + " F", WHITE_TEXT, BODY_SCALE);
   } else if (selectedTab == 2) {
-    drawText(8, 53, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
-    drawText(8, 78, isnan(outsideTemp) ? "Temp: --  RH: --" :
+    drawText(8, 66, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
+    drawText(8, 89, isnan(outsideTemp) ? "Temp: --  RH: --" :
       "Temp:" + String(outsideTemp, 0) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
-    drawText(8, 103, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 112, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
     if (weatherAlert.length())
       drawText(8, 126, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
     else drawText(8, 126, "No active NWS alert", MUTED);
@@ -109,7 +115,7 @@ void drawContent() {
     for (int i = 0; i < 4; ++i)
       drawText(8, 217 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
-    drawText(12, 60, "Settings", ACCENT, 2);
+    drawText(12, 70, "Settings", ACCENT, 2);
     drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
     drawText(12, 125, clipped(roomName, 18), WHITE_TEXT, BODY_SCALE);
     drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
@@ -206,7 +212,7 @@ void pollTouch(unsigned long now) {
   if (now - lastTouch < 200) return;
   uint16_t x, y;
   if (!readTouch(x, y)) return;
-  if (y < 45) {
+  if (y <= TAB_BOTTOM) {
     uint8_t tab = x / 60;
     if (tab < 4 && tab != selectedTab) {
       selectedTab = tab;
