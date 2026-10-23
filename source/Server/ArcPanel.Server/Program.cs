@@ -11,6 +11,7 @@ var clients = new ConcurrentDictionary<string, DateTimeOffset>();
 var setpoints = new ConcurrentDictionary<string, double>();
 var temperatureUnits = new ConcurrentDictionary<string, string>();
 using var feeds = new InformationFeeds();
+using var ha = new HomeAssistantMonitor();
 using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 var listener = new TcpListener(IPAddress.Any, port);
@@ -21,6 +22,7 @@ void Log(string message) =>
 try
 {
     _ = feeds.RunAsync(shutdown.Token, Log);
+    _ = ha.RunAsync(shutdown.Token, Log);
     listener.Start();
     Log($"ArcPanel server listening on TCP {port}");
     while (!shutdown.IsCancellationRequested)
@@ -113,7 +115,9 @@ async Task HandleClientAsync(TcpClient client)
                     });
                     var haInfo = JsonSerializer.Serialize(new {
                         type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0),
-                        status = "Not connected", alerts = Array.Empty<string>()
+                        status = ha.Current.Status, version = ha.Current.Version,
+                        livingRoomTempF = ha.Current.LivingRoomF, kitchenTempF = ha.Current.KitchenF,
+                        alerts = ha.Current.Alerts
                     });
                     await writer.WriteLineAsync(news);
                     await writer.WriteLineAsync(haInfo);

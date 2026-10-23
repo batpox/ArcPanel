@@ -40,10 +40,12 @@ uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
 String lastStatus, lastNewsPayload;
 String forecastTickerF = "Forecast pending", forecastTickerC = "Forecast pending";
-String haStatus = "Not connected", haAlerts = "";
+String haStatus = "Not configured", haVersion = "Unknown", haAlerts = "";
+float haLivingF = NAN, haKitchenF = NAN;
 char temperatureUnits = 'F';
 unsigned long lastTickerDraw = 0, tickerStart = 0;
-static constexpr int TICKER_Y = 267, TICKER_H = 25, TICKER_SPEED = 25;
+static constexpr int TICKER_H = 23, TICKER_SPEED = 32;
+static constexpr uint16_t WEATHER_BLUE = 0x4DDF, FINANCE_GREEN = 0x07E0, HA_CYAN = 0x07FF;
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"Room", "House", "News", "Settings"};
 
@@ -109,28 +111,39 @@ void drawTabs() {
   gfx->drawFastHLine(0, TAB_BOTTOM, SCREEN_W, ACCENT);
 }
 
-// Repaint only the ticker strip. No full-screen redraw or network traffic per frame.
-void drawTicker(unsigned long now) {
-  if (!screenReady || (selectedTab != 1 && selectedTab != 2)) return;
-  String content = selectedTab == 1
-    ? "HA: " + haStatus + "  |  Alerts: " + (haAlerts.length() ? haAlerts : "Unavailable")
-    : (temperatureUnits == 'C' ? forecastTickerC : forecastTickerF);
-  if (!content.length()) content = "Waiting for information";
-  const int glyphWidth = 6; // 1x horizontal, 2x vertical font
-  const int totalWidth = content.length() * glyphWidth + SCREEN_W;
+// 2x text (12x16 pixels), matching the Franklin, PA header.
+// Independently scroll weather, financial and HA information in their own rows.
+void drawTickerLine(const String& content, int y, uint16_t color, unsigned long now) {
+  const int glyphWidth = 12;
+  const int totalWidth = (int)content.length() * glyphWidth + SCREEN_W;
   unsigned long elapsed = now - tickerStart;
-  int offset = (((elapsed / 1000UL) % totalWidth) * TICKER_SPEED +
+  unsigned long seconds = (elapsed / 1000UL) % totalWidth;
+  int offset = (seconds * TICKER_SPEED +
                 ((elapsed % 1000UL) * TICKER_SPEED) / 1000UL) % totalWidth;
   int x = SCREEN_W - offset;
-  gfx->fillRect(0, TICKER_Y, SCREEN_W, TICKER_H, PANEL);
-  gfx->setTextSize(1, 2);
-  gfx->setTextColor(WHITE_TEXT);
-  // Draw only characters intersecting the strip; avoid drawing into neighboring UI.
-  int first = max(0, (-x) / glyphWidth);
-  int last = min((int)content.length(), (SCREEN_W - x) / glyphWidth + 1);
+  gfx->fillRect(0, y, SCREEN_W, TICKER_H, PANEL);
+  gfx->setTextSize(2);
+  gfx->setTextColor(color);
+  int first = max(0, (-x + glyphWidth - 1) / glyphWidth);
+  int last = min((int)content.length(), (SCREEN_W - x) / glyphWidth);
   if (last > first) {
-    gfx->setCursor(x + first * glyphWidth, TICKER_Y + 4);
+    gfx->setCursor(x + first * glyphWidth, y + 3);
     gfx->print(content.substring(first, last));
+  }
+}
+
+void drawTickers(unsigned long now) {
+  if (!screenReady) return;
+  if (selectedTab == 2) {
+    drawTickerLine(temperatureUnits == 'C' ? forecastTickerC : forecastTickerF, 116, WEATHER_BLUE, now);
+    drawTickerLine("Dow " + dowText + "  |  Nasdaq " + nasdaqText, 176, FINANCE_GREEN, now);
+  } else if (selectedTab == 1) {
+    String living = isnan(haLivingF) ? "--" : tempLabel(haLivingF);
+    String kitchen = isnan(haKitchenF) ? "--" : tempLabel(haKitchenF);
+    String content = "HA " + haStatus + "  |  Version " + haVersion +
+      "  |  L/R " + living + "  |  Kitchen " + kitchen +
+      "  |  Alerts " + (haAlerts.length() ? haAlerts : "Unavailable");
+    drawTickerLine(content, 190, HA_CYAN, now);
   }
 }
 
@@ -163,15 +176,13 @@ void drawContent() {
     drawText(8, 76, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
     drawText(8, 97, isnan(outsideTemp) ? "Temp: --  RH: --" :
       "Temp:" + String(displayTemp(outsideTemp), 0) + String(temperatureUnits) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
-    drawText(8, 119, "4-day forecast below", MUTED);
+
     if (weatherAlert.length())
-      drawText(8, 140, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
-    else drawText(8, 140, "No active NWS alert", MUTED);
-    drawText(8, 161, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 184, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 205, "National / World", ACCENT);
+      drawText(8, 146, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
+    else drawText(8, 146, "No active NWS alert", MUTED);
+    drawText(8, 208, "National / World", ACCENT);
     for (int i = 0; i < 2; ++i)
-      drawText(8, 220 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
+      drawText(8, 225 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
     drawText(12, 76, "Settings", ACCENT, 2);
     drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
@@ -182,7 +193,7 @@ void drawContent() {
     gfx->fillRoundRect(12, 240, 216, 45, 7, PANEL);
     drawText(22, 250, String("Temperature: ") + temperatureUnits + "   [F/C]", WHITE_TEXT);
   }
-  if (selectedTab == 1 || selectedTab == 2) drawTicker(millis());
+  if (selectedTab == 1 || selectedTab == 2) drawTickers(millis());
 }
 
 void updateSettingsTelemetry() {
@@ -247,11 +258,19 @@ void handleServerMessage(const String& line) {
     for (int i = 0; i < 4; ++i) headlines[i] = i < stories.size() ? stories[i].as<String>() : "";
     if (selectedTab == 2) refreshContent();
   } else if (strcmp(type, "ha-info") == 0) {
-    String newHaStatus = doc["status"] | "Not connected";
+    String newHaStatus = doc["status"] | "Not configured";
+    String newHaVersion = doc["version"] | "Unknown";
+    float newLiving = doc["livingRoomTempF"].is<double>() || doc["livingRoomTempF"].is<int>() ? doc["livingRoomTempF"].as<float>() : NAN;
+    float newKitchen = doc["kitchenTempF"].is<double>() || doc["kitchenTempF"].is<int>() ? doc["kitchenTempF"].as<float>() : NAN;
     JsonArray haAlertArray = doc["alerts"].as<JsonArray>();
     String newHaAlerts = haAlertArray.size() ? haAlertArray[0].as<String>() : "";
-    bool haChanged = newHaStatus != haStatus || newHaAlerts != haAlerts;
+    bool haChanged = newHaStatus != haStatus || newHaAlerts != haAlerts || newHaVersion != haVersion ||
+      (isnan(newLiving) != isnan(haLivingF)) || (!isnan(newLiving) && fabsf(newLiving - haLivingF) > 0.01f) ||
+      (isnan(newKitchen) != isnan(haKitchenF)) || (!isnan(newKitchen) && fabsf(newKitchen - haKitchenF) > 0.01f);
     haStatus = newHaStatus;
+    haVersion = newHaVersion;
+    haLivingF = newLiving;
+    haKitchenF = newKitchen;
     haAlerts = newHaAlerts;
     if (haChanged && selectedTab == 1) { tickerStart = millis(); refreshContent(); }
     if (doc["setpointF"].is<double>() || doc["setpointF"].is<int>()) {
@@ -424,7 +443,7 @@ void loop() {
   if (dirty) drawScreen();
   else if (screenReady) drawStatus();
   if (screenReady && (selectedTab == 1 || selectedTab == 2) && now - lastTickerDraw >= 80) {
-    drawTicker(now);
+    drawTickers(now);
     lastTickerDraw = now;
   }
   if (screenReady && selectedTab == 3 && now - lastDraw >= 1000) { updateSettingsTelemetry(); lastDraw = now; }
