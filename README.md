@@ -79,3 +79,12 @@ On the 240×320 display, the four top tab targets are now 58 pixels tall
 (previously 40 pixels). Tab lettering uses the built-in narrow/tall
 1× horizontal / 2× vertical text scale so eight-character labels fit
 within the 60-pixel columns without an additional font library.
+
+### ArcUnit room controls
+
+The Room screen uses two side-by-side panels rather than concentric rings:
+actual measured room temperature and humidity on the left, and the desired
+setpoint on the right. Large up/down chevrons adjust the target in 0.5°F
+increments (50–85°F). The existing 3-second idle debounce and heartbeat
+setpoint reporting are unchanged. Until the SHT40 is wired into the firmware,
+the actual room readings remain simulated.
