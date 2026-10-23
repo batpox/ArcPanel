@@ -247,16 +247,19 @@ void handleServerMessage(const String& line) {
     for (int i = 0; i < 4; ++i) headlines[i] = i < stories.size() ? stories[i].as<String>() : "";
     if (selectedTab == 2) refreshContent();
   } else if (strcmp(type, "ha-info") == 0) {
-    haStatus = doc["status"] | "Not connected";
+    String newHaStatus = doc["status"] | "Not connected";
     JsonArray haAlertArray = doc["alerts"].as<JsonArray>();
-    haAlerts = haAlertArray.size() ? haAlertArray[0].as<String>() : "";
-    if (selectedTab == 1) refreshContent();
+    String newHaAlerts = haAlertArray.size() ? haAlertArray[0].as<String>() : "";
+    bool haChanged = newHaStatus != haStatus || newHaAlerts != haAlerts;
+    haStatus = newHaStatus;
+    haAlerts = newHaAlerts;
+    if (haChanged && selectedTab == 1) { tickerStart = millis(); refreshContent(); }
     if (doc["setpointF"].is<double>() || doc["setpointF"].is<int>()) {
       haSetpoint = doc["setpointF"].as<float>();
       haveHaInfo = true;
       // Don't overwrite a local adjustment waiting to be transmitted.
       if (!pendingSetpoint && fabsf(setpoint - haSetpoint) > 0.01f) { setpoint = haSetpoint; if (selectedTab == 0) refreshContent(); }
-      if (selectedTab == 1) refreshContent();
+
     }
   }
 }
