@@ -106,3 +106,35 @@ Scrolling happens locally, without a separate network message per frame.
 **Important:** HA API connectivity has not been implemented yet. Until it
 is, the House ticker correctly shows `HA: Not connected | Alerts: Unavailable`,
 not simulated HA data. The SHT40 sensor integration also remains pending.
+
+### Large color tickers and Home Assistant monitor
+
+Tickers use the same 2× bitmap text as the orange location heading (12×16 px).
+On News, a **blue weather ticker** replaces the forecast row, and a
+**green financial ticker** replaces the fixed Dow/Nasdaq lines. On House,
+a **cyan Home Assistant ticker** shows version, connection status,
+living-room temperature, kitchen temperature, and any configured alert.
+All three scroll locally on the ArcUnit; tickers need not be at the bottom.
+
+The server now has a **read-only Home Assistant REST monitor** that polls
+every 30 seconds. Configure environment variables on the **C# server**
+before starting it:
+
+- `ARC_HA_URL` — e.g. `http://homeassistant.local:8123`
+- `ARC_HA_TOKEN` — Home Assistant long-lived access token (keep secret)
+- `ARC_HA_LIVING_ROOM_ENTITY` — exact entity ID, e.g. `sensor.living_room_temperature`
+- `ARC_HA_KITCHEN_ENTITY` — exact entity ID, e.g. `sensor.kitchen_temperature`
+- `ARC_HA_ALERT_ENTITY` — optional entity ID for alert state
+
+Entity IDs above are **examples**, not verified names from your HA installation.
+The monitor reads HA's `/api/config` for the installed version and
+`/api/states/{entity_id}` for temperature/alert states. It supports sensor
+temperatures reported in °F or °C and converts to Fahrenheit for the
+existing wire protocol; the ArcUnit displays the user's preferred units.
+Unknown/unconfigured sensors display `--`, not fabricated readings.
+If HA credentials are missing, the status is `Not configured`; connection
+failures show `Offline`. The access token is never sent to an ArcUnit.
+
+This is a first read-only REST connection, **not yet the full HA WebSocket
+subscription and action integration**. ARC setpoints still are not wired
+to HA heating controls.
