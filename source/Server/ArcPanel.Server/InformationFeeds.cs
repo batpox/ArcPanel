@@ -26,6 +26,7 @@ internal sealed class InformationFeeds : IDisposable
         public double? OutsideHumidity { get; init; }
         public string Forecast { get; init; } = "Forecast unavailable";
         public string ForecastTicker { get; init; } = "Forecast unavailable";
+        public string ForecastTickerC { get; init; } = "Forecast unavailable";
         public string[] Alerts { get; init; } = [];
         public string[] Headlines { get; init; } = [];
         public string Dow { get; init; } = "Unavailable";
@@ -54,6 +55,7 @@ internal sealed class InformationFeeds : IDisposable
         double? temperature = current.OutsideTempF, humidity = current.OutsideHumidity;
         string forecast = current.Forecast;
         string forecastTicker = current.ForecastTicker;
+        string forecastTickerC = current.ForecastTickerC;
         var alerts = current.Alerts;
         var headlines = current.Headlines;
         string dow = current.Dow, nasdaq = current.Nasdaq;
@@ -78,6 +80,8 @@ internal sealed class InformationFeeds : IDisposable
             var rains = daily.GetProperty("precipitation_probability_max");
             forecastTicker = string.Join("  |  ", Enumerable.Range(0, Math.Min(4, dates.GetArrayLength())).Select(i =>
                 $"{(i == 0 ? "Today" : DateTime.Parse(dates[i].GetString()!, CultureInfo.InvariantCulture).ToString("ddd", CultureInfo.InvariantCulture))}: H{highs[i].GetDouble():0} L{lows[i].GetDouble():0}F Rain {rains[i].GetInt32()}%"));
+            forecastTickerC = string.Join("  |  ", Enumerable.Range(0, Math.Min(4, dates.GetArrayLength())).Select(i =>
+                $"{(i == 0 ? "Today" : DateTime.Parse(dates[i].GetString()!, CultureInfo.InvariantCulture).ToString("ddd", CultureInfo.InvariantCulture))}: H{(highs[i].GetDouble()-32)*5/9:0} L{(lows[i].GetDouble()-32)*5/9:0}C Rain {rains[i].GetInt32()}%"));
             weatherUpdated = DateTimeOffset.UtcNow;
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { log($"Weather fetch failed: {ex.Message}"); }
@@ -116,7 +120,7 @@ internal sealed class InformationFeeds : IDisposable
         lock (gate)
             snapshot = new Snapshot {
                 OutsideTempF = temperature, OutsideHumidity = humidity, Forecast = forecast,
-                ForecastTicker = forecastTicker, Alerts = alerts, Headlines = headlines, Dow = dow, Nasdaq = nasdaq,
+                ForecastTicker = forecastTicker, ForecastTickerC = forecastTickerC, Alerts = alerts, Headlines = headlines, Dow = dow, Nasdaq = nasdaq,
                 Location = locationName, WeatherUpdated = weatherUpdated, NewsUpdated = newsUpdated
             };
         log($"Feeds refreshed: weather={(temperature.HasValue ? "available" : "unavailable")}, alerts={alerts.Length}, headlines={headlines.Length}, Dow={dow}, Nasdaq={nasdaq}");
