@@ -32,15 +32,15 @@ float outsideTemp = NAN, outsideHumidity = NAN;
 String headlines[4] = {"Waiting for news...", "", "", ""};
 String forecastText = "Forecast unavailable", weatherAlert = "", dowText = "--", nasdaqText = "--", weatherLocation = "";
 static constexpr uint8_t BODY_SCALE = 2;
-static constexpr int TAB_HEIGHT = 58, TAB_BOTTOM = TAB_HEIGHT + 3; // 61px touch targets
-// Body text is 12px wide; tabs use 6px-wide, 16px-high glyphs.
+static constexpr int TAB_HEIGHT = 66, TAB_BOTTOM = TAB_HEIGHT + 3; // 69px touch targets
+// Body text is 12px wide; tab labels use large 12x16px glyphs.
 bool pendingSetpoint = false, haveHaInfo = false;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
 String lastStatus, lastNewsPayload;
 uint8_t selectedTab = 0;
-const char* tabNames[] = {"ARC Room", "ARC House", "News", "Settings"};
+const char* tabNames[] = {"Room", "House", "News", "Settings"};
 
 void logMessage(const String& message) {
   unsigned long ms = millis();
@@ -69,15 +69,34 @@ String clipped(const String& value, int maxChars) {
   return value.length() <= (unsigned)maxChars ? value : value.substring(0, maxChars);
 }
 
+// Simple vector gear: independent of installed fonts and display resolution.
+void drawSettingsGear(int cx, int cy, uint16_t color) {
+  gfx->fillCircle(cx, cy, 15, color);
+  for (int i = 0; i < 8; ++i) {
+    float angle = i * PI / 4.0f;
+    int x1 = cx + (int)(13 * cosf(angle));
+    int y1 = cy + (int)(13 * sinf(angle));
+    int x2 = cx + (int)(21 * cosf(angle));
+    int y2 = cy + (int)(21 * sinf(angle));
+    gfx->drawLine(x1, y1, x2, y2, color);
+    gfx->fillCircle(x2, y2, 3, color);
+  }
+  gfx->fillCircle(cx, cy, 7, selectedTab == 3 ? ACCENT : PANEL);
+}
+
 void drawTabs() {
   for (int i = 0; i < 4; ++i) {
     int x = i * 60;
-    gfx->fillRoundRect(x + 1, 2, 58, TAB_HEIGHT, 5, i == selectedTab ? ACCENT : PANEL);
-    // Narrow/tall built-in font: 6px per character, 16px tall (no extra font dependency).
-    gfx->setTextSize(1, 2);
-    gfx->setTextColor(i == selectedTab ? BG : WHITE_TEXT);
-    gfx->setCursor(x + 5, 23);
-    gfx->print(clipped(tabNames[i], 8));
+    gfx->fillRoundRect(x + 1, 2, 58, TAB_HEIGHT, 6, i == selectedTab ? ACCENT : PANEL);
+    uint16_t ink = i == selectedTab ? BG : WHITE_TEXT;
+    if (i == 3) {
+      drawSettingsGear(x + 30, 34, ink);
+    } else {
+      gfx->setTextSize(2);
+      gfx->setTextColor(ink);
+      gfx->setCursor(x + (60 - (int)strlen(tabNames[i]) * 12) / 2, 27);
+      gfx->print(tabNames[i]);
+    }
   }
   gfx->drawFastHLine(0, TAB_BOTTOM, SCREEN_W, ACCENT);
 }
@@ -86,7 +105,7 @@ void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
     // Two-zone layout: live measurement left; adjustable target right.
-    drawText(9, 68, clipped(roomName, 19), ACCENT, 2);
+    drawText(9, 76, clipped(roomName, 19), ACCENT, 2);
     gfx->fillRoundRect(7, 96, 106, 185, 10, PANEL);
     gfx->fillRoundRect(122, 96, 111, 185, 10, PANEL);
     drawText(19, 107, "Actual", MUTED);
@@ -104,24 +123,24 @@ void drawContent() {
     drawChevron(177, 243, false, BG);
     if (pendingSetpoint) drawText(129, 273, "Pending", ACCENT);
   } else if (selectedTab == 1) {
-    drawText(12, 70, "ARC House", ACCENT, 2);
+    drawText(12, 76, "ARC House", ACCENT, 2);
     drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
     if (haveHaInfo) drawText(12, 143, "HA: " + String(haSetpoint, 1) + " F", WHITE_TEXT, BODY_SCALE);
   } else if (selectedTab == 2) {
-    drawText(8, 66, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
-    drawText(8, 89, isnan(outsideTemp) ? "Temp: --  RH: --" :
+    drawText(8, 76, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
+    drawText(8, 97, isnan(outsideTemp) ? "Temp: --  RH: --" :
       "Temp:" + String(outsideTemp, 0) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
-    drawText(8, 112, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 119, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
     if (weatherAlert.length())
-      drawText(8, 126, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
-    else drawText(8, 126, "No active NWS alert", MUTED);
-    drawText(8, 151, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 175, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 200, "National / World", ACCENT);
+      drawText(8, 140, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
+    else drawText(8, 140, "No active NWS alert", MUTED);
+    drawText(8, 161, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 184, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 205, "National / World", ACCENT);
     for (int i = 0; i < 4; ++i)
-      drawText(8, 217 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
+      drawText(8, 220 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
-    drawText(12, 70, "Settings", ACCENT, 2);
+    drawText(12, 76, "Settings", ACCENT, 2);
     drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
     drawText(12, 125, clipped(roomName, 18), WHITE_TEXT, BODY_SCALE);
     drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
