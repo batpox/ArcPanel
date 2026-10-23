@@ -107,7 +107,7 @@ async Task HandleClientAsync(TcpClient client)
                     var news = JsonSerializer.Serialize(new {
                         type = "news", schemaVersion = 1, outsideTempF = data.OutsideTempF,
                         outsideHumidity = data.OutsideHumidity, location = data.Location,
-                        forecast = data.Forecast, forecastTicker = data.ForecastTicker, alerts = data.Alerts,
+                        forecast = data.Forecast, forecastTicker = data.ForecastTicker, forecastTickerC = data.ForecastTickerC, alerts = data.Alerts,
                         headlines = data.Headlines, dow = data.Dow, nasdaq = data.Nasdaq,
                         weatherUpdated = data.WeatherUpdated, newsUpdated = data.NewsUpdated
                     });
