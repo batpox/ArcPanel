@@ -30,3 +30,22 @@ Client serial logs use uptime seconds.milliseconds; server logs use wall-clock t
 The News screen displays the 4-day Open-Meteo high/low/rain ticker, in the selected unit, instead of the previous single-day forecast line. The House screen displays a HA status/alert ticker. Both are locally animated on the ArcUnit and do not generate additional network messages. **Home Assistant API integration has not yet been implemented:** the server explicitly sends `status: "Not connected"` and an empty `alerts` array. The client displays `Alerts: Unavailable` rather than falsely claiming there are no HA alerts. The server must be connected to HA before real status and alerts can appear.
 
 Weather forecasts and financial/news data are fetched by the server every 15 minutes. Four-day forecast text is provided in both `forecastTicker` (F) and `forecastTickerC` (C); these are cached strings. No settings are erased on ordinary firmware upgrades.
+
+## Colored tickers and HA REST snapshot
+
+News now has two independent locally animated tickers: blue four-day
+weather at y=116 and green Dow/Nasdaq at y=176. House has a cyan HA ticker
+at y=190. Ticker glyphs are 12×16 pixels, matching the News location
+heading; the financial values are no longer fixed labels.
+
+`ha-info` adds `version`, `livingRoomTempF`, and `kitchenTempF`
+(nullable), along with `status` and `alerts`. Example:
+
+```json
+{"type":"ha-info","roomId":"LivingRoom","setpointF":70,"status":"Online","version":"2026.10.0","livingRoomTempF":70.1,"kitchenTempF":71.4,"alerts":[]}
+```
+
+These values come from an optional, read-only Home Assistant REST monitor.
+Until `ARC_HA_URL`, `ARC_HA_TOKEN` and relevant exact sensor entity IDs
+are configured, status is `Not configured` and temperatures are null.
+See README for configuration. HA version above is illustrative only.
