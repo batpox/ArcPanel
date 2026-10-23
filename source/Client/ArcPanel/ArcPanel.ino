@@ -54,14 +54,13 @@ void drawText(int x, int y, const String& s, uint16_t color, uint8_t scale = 1) 
   gfx->print(s);
 }
 
-// Draw a ring without repainting the whole display on each heartbeat.
-void drawRing(int cx, int cy, int radius, float degrees, uint16_t color, int thickness) {
-  degrees = constrain(degrees, 0.0f, 360.0f);
-  for (int d = 0; d < (int)degrees; d += 3) {
-    float a = (d - 90) * PI / 180.0f;
-    for (int t = 0; t < thickness; ++t)
-      gfx->drawLine(cx + (int)((radius-t)*cosf(a)), cy + (int)((radius-t)*sinf(a)),
-                    cx + (int)((radius-t)*cosf(a+3*PI/180.0f)), cy + (int)((radius-t)*sinf(a+3*PI/180.0f)), color);
+// High-contrast chevron, sized for a finger rather than a stylus.
+void drawChevron(int cx, int cy, bool up, uint16_t color) {
+  int tipY = up ? cy - 10 : cy + 10;
+  int baseY = up ? cy + 7 : cy - 7;
+  for (int offset = -2; offset <= 2; ++offset) {
+    gfx->drawLine(cx - 17, baseY + offset, cx, tipY + offset, color);
+    gfx->drawLine(cx, tipY + offset, cx + 17, baseY + offset, color);
   }
 }
 
@@ -86,17 +85,24 @@ void drawTabs() {
 void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
-    drawText(10, 66, clipped(roomName, 19), ACCENT, 2);
-    drawText(12, 85, String("Room: ") + String(roomTemp, 1) + " F", WHITE_TEXT, BODY_SCALE);
-    drawText(12, 108, String("RH: ") + String(roomHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
-    // Outer ring: setpoint. Inner ring: measured temperature, normalized to 50..85 F.
-    drawRing(120, 205, 80, 360, PANEL, 7);
-    drawRing(120, 205, 80, 360 * (setpoint - 50) / 35, ACCENT, 7);
-    drawRing(120, 205, 65, 360, PANEL, 5);
-    drawRing(120, 205, 65, 360 * (roomTemp - 50) / 35, GREEN_TEXT, 5);
-    drawText(79, 194, String(setpoint, 1) + " F", WHITE_TEXT, 2);
-    drawText(70, 224, "Setpoint", MUTED);
-    drawText(8, 280, "Tap outer ring to adjust", MUTED);
+    // Two-zone layout: live measurement left; adjustable target right.
+    drawText(9, 68, clipped(roomName, 19), ACCENT, 2);
+    gfx->fillRoundRect(7, 96, 106, 185, 10, PANEL);
+    gfx->fillRoundRect(122, 96, 111, 185, 10, PANEL);
+    drawText(19, 107, "Actual", MUTED);
+    drawText(130, 107, "Setpoint", MUTED);
+    // Large live temperature, with separate fractional digit.
+    drawText(13, 163, String(roomTemp, 1), WHITE_TEXT, 2);
+    drawText(24, 207, "F", GREEN_TEXT, 2);
+    drawText(17, 252, "RH " + String(roomHumidity, 0) + "%", MUTED);
+    // Two large touch targets, with the requested temperature between them.
+    gfx->fillRoundRect(135, 126, 85, 43, 9, ACCENT);
+    drawChevron(177, 147, true, BG);
+    drawText(132, 180, String(setpoint, 1), WHITE_TEXT, 2);
+    drawText(206, 185, "F", MUTED);
+    gfx->fillRoundRect(135, 222, 85, 43, 9, ACCENT);
+    drawChevron(177, 243, false, BG);
+    if (pendingSetpoint) drawText(129, 273, "Pending", ACCENT);
   } else if (selectedTab == 1) {
     drawText(12, 70, "ARC House", ACCENT, 2);
     drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
@@ -220,12 +226,12 @@ void pollTouch(unsigned long now) {
       logMessage(String("Selected tab: ") + tabNames[tab]);
     }
   } else if (selectedTab == 0) {
-    float dx = (float)x - 120, dy = (float)y - 205;
-    float radius = sqrtf(dx*dx + dy*dy);
-    if (radius >= 68 && radius <= 91) {
-      float angle = atan2f(dy, dx) * 180.0f / PI + 90;
-      if (angle < 0) angle += 360;
-      float requested = roundf((50.0f + 35.0f * angle / 360.0f) * 2) / 2.0f;
+    // 0.5 F per press; 50..85 F. Only right-hand chevrons adjust setpoint.
+    if (x >= 130 && x <= 225) {
+      float requested = setpoint;
+      if (y >= 122 && y <= 174) requested += 0.5f;
+      else if (y >= 217 && y <= 270) requested -= 0.5f;
+      requested = constrain(requested, 50.0f, 85.0f);
       if (fabsf(requested - setpoint) >= 0.25f) {
         setpoint = requested;
         setpointChangedAt = now;
