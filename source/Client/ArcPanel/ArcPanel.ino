@@ -132,13 +132,13 @@ void drawContent() {
       "Temp:" + String(outsideTemp, 0) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
     drawText(8, 119, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
     if (weatherAlert.length())
-      drawText(8, 126, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
-    else drawText(8, 126, "No active NWS alert", MUTED);
-    drawText(8, 151, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 175, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
-    drawText(8, 200, "National / World", ACCENT);
+      drawText(8, 140, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
+    else drawText(8, 140, "No active NWS alert", MUTED);
+    drawText(8, 161, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 184, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
+    drawText(8, 205, "National / World", ACCENT);
     for (int i = 0; i < 4; ++i)
-      drawText(8, 217 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
+      drawText(8, 220 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
     drawText(12, 76, "Settings", ACCENT, 2);
     drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
