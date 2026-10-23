@@ -39,6 +39,11 @@ float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
 String lastStatus, lastNewsPayload;
+String forecastTickerF = "Forecast pending", forecastTickerC = "Forecast pending";
+String haStatus = "Not connected", haAlerts = "";
+char temperatureUnits = 'F';
+unsigned long lastTickerDraw = 0, tickerStart = 0;
+static constexpr int TICKER_Y = 267, TICKER_H = 25, TICKER_SPEED = 25;
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"Room", "House", "News", "Settings"};
 
@@ -46,6 +51,9 @@ void logMessage(const String& message) {
   unsigned long ms = millis();
   Serial.printf("[%lu.%03lu] %s\n", ms / 1000, ms % 1000, message.c_str());
 }
+
+float displayTemp(float fahrenheit) { return temperatureUnits == 'C' ? (fahrenheit - 32.0f) * 5.0f / 9.0f : fahrenheit; }
+String tempLabel(float fahrenheit) { return String(displayTemp(fahrenheit), 1) + String(temperatureUnits); }
 
 void drawText(int x, int y, const String& s, uint16_t color, uint8_t scale = 1) {
   gfx->setTextSize(scale);
@@ -101,6 +109,29 @@ void drawTabs() {
   gfx->drawFastHLine(0, TAB_BOTTOM, SCREEN_W, ACCENT);
 }
 
+// Repaint only the ticker strip. No full-screen redraw or network traffic per frame.
+void drawTicker(unsigned long now) {
+  if (!screenReady || (selectedTab != 1 && selectedTab != 2)) return;
+  String content = selectedTab == 1
+    ? "HA: " + haStatus + "  |  Alerts: " + (haAlerts.length() ? haAlerts : "Unavailable")
+    : (temperatureUnits == 'C' ? forecastTickerC : forecastTickerF);
+  if (!content.length()) content = "Waiting for information";
+  const int glyphWidth = 6; // 1x horizontal, 2x vertical font
+  const int totalWidth = content.length() * glyphWidth + SCREEN_W;
+  int offset = ((now - tickerStart) * TICKER_SPEED / 1000UL) % totalWidth;
+  int x = SCREEN_W - offset;
+  gfx->fillRect(0, TICKER_Y, SCREEN_W, TICKER_H, PANEL);
+  gfx->setTextSize(1, 2);
+  gfx->setTextColor(WHITE_TEXT);
+  // Draw only characters intersecting the strip; avoid drawing into neighboring UI.
+  int first = max(0, (-x) / glyphWidth);
+  int last = min((int)content.length(), (SCREEN_W - x) / glyphWidth + 1);
+  if (last > first) {
+    gfx->setCursor(x + first * glyphWidth, TICKER_Y + 4);
+    gfx->print(content.substring(first, last));
+  }
+}
+
 void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
@@ -111,33 +142,33 @@ void drawContent() {
     drawText(19, 107, "Actual", MUTED);
     drawText(130, 107, "Setpoint", MUTED);
     // Large live temperature, with separate fractional digit.
-    drawText(13, 163, String(roomTemp, 1), WHITE_TEXT, 2);
-    drawText(24, 207, "F", GREEN_TEXT, 2);
+    drawText(13, 163, tempLabel(roomTemp), WHITE_TEXT, 2);
+    drawText(24, 207, String(temperatureUnits), GREEN_TEXT, 2);
     drawText(17, 252, "RH " + String(roomHumidity, 0) + "%", MUTED);
     // Two large touch targets, with the requested temperature between them.
     gfx->fillRoundRect(135, 126, 85, 43, 9, ACCENT);
     drawChevron(177, 147, true, BG);
-    drawText(132, 180, String(setpoint, 1), WHITE_TEXT, 2);
-    drawText(206, 185, "F", MUTED);
+    drawText(132, 180, String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
+    drawText(206, 185, String(temperatureUnits), MUTED);
     gfx->fillRoundRect(135, 222, 85, 43, 9, ACCENT);
     drawChevron(177, 243, false, BG);
     if (pendingSetpoint) drawText(129, 273, "Pending", ACCENT);
   } else if (selectedTab == 1) {
     drawText(12, 76, "ARC House", ACCENT, 2);
     drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
-    if (haveHaInfo) drawText(12, 143, "HA: " + String(haSetpoint, 1) + " F", WHITE_TEXT, BODY_SCALE);
+    if (haveHaInfo) drawText(12, 143, "HA: " + tempLabel(haSetpoint), WHITE_TEXT, BODY_SCALE);
   } else if (selectedTab == 2) {
     drawText(8, 76, clipped(weatherLocation.length() ? weatherLocation : "Local weather", 19), ACCENT, BODY_SCALE);
     drawText(8, 97, isnan(outsideTemp) ? "Temp: --  RH: --" :
-      "Temp:" + String(outsideTemp, 0) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
-    drawText(8, 119, clipped(forecastText, 19), WHITE_TEXT, BODY_SCALE);
+      "Temp:" + String(displayTemp(outsideTemp), 0) + String(temperatureUnits) + " RH:" + String(outsideHumidity, 0) + "%", WHITE_TEXT, BODY_SCALE);
+    drawText(8, 119, "4-day forecast below", MUTED);
     if (weatherAlert.length())
       drawText(8, 140, clipped("ALERT: " + weatherAlert, 19), ACCENT, BODY_SCALE);
     else drawText(8, 140, "No active NWS alert", MUTED);
     drawText(8, 161, clipped("Dow: " + dowText, 19), WHITE_TEXT, BODY_SCALE);
     drawText(8, 184, clipped("Nasdaq: " + nasdaqText, 19), WHITE_TEXT, BODY_SCALE);
     drawText(8, 205, "National / World", ACCENT);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 2; ++i)
       drawText(8, 220 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
     drawText(12, 76, "Settings", ACCENT, 2);
@@ -146,7 +177,10 @@ void drawContent() {
     drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
     drawText(12, 185, String("ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT, BODY_SCALE);
     drawText(12, 212, "Interval: 2 seconds", MUTED);
+    gfx->fillRoundRect(12, 240, 216, 45, 7, PANEL);
+    drawText(22, 250, String("Temperature: ") + temperatureUnits + "   [F/C]", WHITE_TEXT);
   }
+  if (selectedTab == 1 || selectedTab == 2) drawTicker(millis());
 }
 
 void updateSettingsTelemetry() {
@@ -193,12 +227,15 @@ void handleServerMessage(const String& line) {
   if (strcmp(type, "ack") == 0) {
     lastAck = millis();
     if (selectedTab == 3) updateSettingsTelemetry();
+    // Server echoes the accepted units; device preference remains authoritative.
   } else if (strcmp(type, "news") == 0) {
     if (line == lastNewsPayload) return; // Server sends cached news with each heartbeat.
     lastNewsPayload = line;
     outsideTemp = doc["outsideTempF"].is<double>() || doc["outsideTempF"].is<int>() ? doc["outsideTempF"].as<float>() : NAN;
     outsideHumidity = doc["outsideHumidity"].is<double>() || doc["outsideHumidity"].is<int>() ? doc["outsideHumidity"].as<float>() : NAN;
     forecastText = doc["forecast"] | "Forecast unavailable";
+    forecastTickerF = doc["forecastTicker"] | "Forecast unavailable";
+    forecastTickerC = doc["forecastTickerC"] | "Forecast unavailable";
     weatherLocation = doc["location"] | "Local weather";
     dowText = doc["dow"] | "Unavailable";
     nasdaqText = doc["nasdaq"] | "Unavailable";
@@ -208,6 +245,10 @@ void handleServerMessage(const String& line) {
     for (int i = 0; i < 4; ++i) headlines[i] = i < stories.size() ? stories[i].as<String>() : "";
     if (selectedTab == 2) refreshContent();
   } else if (strcmp(type, "ha-info") == 0) {
+    haStatus = doc["status"] | "Not connected";
+    JsonArray haAlertArray = doc["alerts"].as<JsonArray>();
+    haAlerts = haAlertArray.size() ? haAlertArray[0].as<String>() : "";
+    if (selectedTab == 1) refreshContent();
     if (doc["setpointF"].is<double>() || doc["setpointF"].is<int>()) {
       haSetpoint = doc["setpointF"].as<float>();
       haveHaInfo = true;
@@ -244,6 +285,13 @@ void pollTouch(unsigned long now) {
       dirty = true;
       logMessage(String("Selected tab: ") + tabNames[tab]);
     }
+  } else if (selectedTab == 3) {
+    if (x >= 12 && x <= 228 && y >= 237 && y <= 289) {
+      temperatureUnits = temperatureUnits == 'F' ? 'C' : 'F';
+      preferences.putString("TemperatureUnits", String(temperatureUnits));
+      logMessage(String("TemperatureUnits changed to ") + temperatureUnits);
+      refreshContent();
+    }
   } else if (selectedTab == 0) {
     // 0.5 F per press; 50..85 F. Only right-hand chevrons adjust setpoint.
     if (x >= 130 && x <= 225) {
@@ -271,6 +319,8 @@ void setup() {
   snprintf(id, sizeof(id), "ESP32-%012llX", (unsigned long long)mac);
   deviceId = id;
   roomId = ROOM_ID;
+  String savedUnits = preferences.getString("TemperatureUnits", "F");
+  temperatureUnits = savedUnits == "C" ? 'C' : 'F';
   // A locally cached server-assigned display name may override the default.
   roomName = preferences.getString("room", roomId);
   if (roomName == "Unassigned" || roomName.isEmpty()) roomName = roomId;
@@ -330,6 +380,7 @@ void loop() {
         hb["uptimeMs"] = now;
         hb["roomTempF"] = roomTemp;
         hb["roomHumidity"] = roomHumidity;
+        hb["temperatureUnits"] = String(temperatureUnits);
         bool sendSetpoint = pendingSetpoint && now - setpointChangedAt >= 3000;
         if (sendSetpoint) hb["setpointF"] = setpoint;
         String payload;
@@ -366,6 +417,10 @@ void loop() {
   }
   if (dirty) drawScreen();
   else if (screenReady) drawStatus();
+  if (screenReady && (selectedTab == 1 || selectedTab == 2) && now - lastTickerDraw >= 80) {
+    drawTicker(now);
+    lastTickerDraw = now;
+  }
   if (screenReady && selectedTab == 3 && now - lastDraw >= 1000) { updateSettingsTelemetry(); lastDraw = now; }
   delay(10);
 }
