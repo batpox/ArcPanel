@@ -27,7 +27,8 @@ Preferences preferences;
 String deviceId, roomId, roomName, receiveBuffer;
 unsigned long lastSend = 0, lastRetry = 0, lastWifiRetry = 0;
 unsigned long lastAck = 0, lastDraw = 0, lastTouch = 0, setpointChangedAt = 0;
-float roomTemp = 70.5f, roomHumidity = 46.0f, setpoint = 70.0f;
+float roomTemp = NAN, roomHumidity = NAN, setpoint = 70.0f;
+int8_t guestFloorState = -1; // -1 unknown, 0 off, 1 on
 float outsideTemp = NAN, outsideHumidity = NAN;
 String headlines[4] = {"Waiting for news...", "", "", ""};
 String forecastText = "Forecast unavailable", weatherAlert = "", dowText = "--", nasdaqText = "--", weatherLocation = "";
@@ -157,17 +158,18 @@ void drawContent() {
     drawText(19, 107, "Actual", MUTED);
     drawText(130, 107, "Setpoint", MUTED);
     // Large live temperature, with separate fractional digit.
-    drawText(13, 163, tempLabel(roomTemp), WHITE_TEXT, 2);
+    drawText(13, 163, isnan(roomTemp) ? "--" : tempLabel(roomTemp), WHITE_TEXT, 2);
     drawText(24, 207, String(temperatureUnits), GREEN_TEXT, 2);
-    drawText(17, 252, "RH " + String(roomHumidity, 0) + "%", MUTED);
+    drawText(17, 252, isnan(roomHumidity) ? "RH --" : "RH " + String(roomHumidity, 0) + "%", MUTED);
     // Two large touch targets, with the requested temperature between them.
     gfx->fillRoundRect(135, 126, 85, 43, 9, ACCENT);
     drawChevron(177, 147, true, BG);
-    drawText(132, 180, String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
+    drawText(132, 180, !haveHaInfo && !pendingSetpoint ? "--" : String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
     drawText(206, 185, String(temperatureUnits), MUTED);
     gfx->fillRoundRect(135, 222, 85, 43, 9, ACCENT);
     drawChevron(177, 243, false, BG);
     if (pendingSetpoint) drawText(129, 273, "Pending", ACCENT);
+    else drawText(129, 273, guestFloorState < 0 ? "Heat: --" : (guestFloorState ? "Heat: ON" : "Heat: OFF"), MUTED);
   } else if (selectedTab == 1) {
     drawText(12, 76, "ARC House", ACCENT, 2);
     drawText(12, 115, "ARC House", WHITE_TEXT, BODY_SCALE);
@@ -273,6 +275,18 @@ void handleServerMessage(const String& line) {
     haKitchenF = newKitchen;
     haAlerts = newHaAlerts;
     if (haChanged && selectedTab == 1) { tickerStart = millis(); refreshContent(); }
+    // HA owns the authoritative GuestBedroom room temperature and relay state.
+    if (roomId == "GuestBedroom") {
+      float newTemp = doc["roomTempF"].is<float>() || doc["roomTempF"].is<double>() ||
+                      doc["roomTempF"].is<int>() ? doc["roomTempF"].as<float>() : NAN;
+      int8_t newFloor = doc["guestFloorOn"].is<bool>() ? (doc["guestFloorOn"].as<bool>() ? 1 : 0) : -1;
+      bool changed = (isnan(newTemp) != isnan(roomTemp)) ||
+                     (!isnan(newTemp) && fabsf(newTemp - roomTemp) > 0.01f) ||
+                     newFloor != guestFloorState;
+      roomTemp = newTemp;
+      guestFloorState = newFloor;
+      if (changed && selectedTab == 0) refreshContent();
+    }
     if (doc["setpointF"].is<double>() || doc["setpointF"].is<int>()) {
       haSetpoint = doc["setpointF"].as<float>();
       haveHaInfo = true;
@@ -319,7 +333,7 @@ void pollTouch(unsigned long now) {
   } else if (selectedTab == 0) {
     // Half-degree increments in selected units; wire protocol remains Fahrenheit.
     if (x >= 130 && x <= 225) {
-      float step = temperatureUnits == 'C' ? 0.9f : 0.5f;
+      float step = temperatureUnits == 'C' ? 1.8f : 1.0f; // HA helper uses 1°F steps
       float requested = setpoint;
       if (y >= 122 && y <= 174) requested += step;
       else if (y >= 217 && y <= 270) requested -= step;
@@ -403,8 +417,8 @@ void loop() {
         hb["deviceId"] = deviceId;
         hb["roomId"] = roomId;
         hb["uptimeMs"] = now;
-        hb["roomTempF"] = roomTemp;
-        hb["roomHumidity"] = roomHumidity;
+        // Do not send fabricated room measurements before SHT40 is connected.
+        if (!isnan(roomHumidity)) hb["roomHumidity"] = roomHumidity;
         hb["temperatureUnits"] = String(temperatureUnits);
         bool sendSetpoint = pendingSetpoint && now - setpointChangedAt >= 3000;
         if (sendSetpoint) hb["setpointF"] = setpoint;
