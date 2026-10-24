@@ -8,7 +8,6 @@ using ArcPanel.Server;
 const int port = 5000;
 const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
-var setpoints = new ConcurrentDictionary<string, double>();
 var temperatureUnits = new ConcurrentDictionary<string, string>();
 using var feeds = new InformationFeeds();
 using var ha = new HomeAssistantMonitor();
@@ -80,8 +79,12 @@ async Task HandleClientAsync(TcpClient client)
                     if (root.TryGetProperty("setpointF", out var sp) && sp.ValueKind == JsonValueKind.Number &&
                         sp.TryGetDouble(out var requested) && requested >= 50 && requested <= 85)
                     {
-                        setpoints[roomId ?? deviceId] = requested;
-                        Log($"Setpoint from {deviceId} ({roomId}): {requested:F1} F");
+                        if (roomId == "GuestBedroom")
+                        {
+                            bool accepted = await ha.SetGuestBedroomSetpointAsync(requested, shutdown.Token);
+                            Log($"GuestBedroom setpoint request from {deviceId}: {requested:F1} F, accepted={accepted}");
+                        }
+                        else Log($"Ignored setpoint request from unmapped room {roomId ?? "(null)"}");
                     }
                     if (root.TryGetProperty("roomTempF", out var rt) && root.TryGetProperty("roomHumidity", out var rh))
                         Log($"Room telemetry {roomId}: {rt} F, {rh}% humidity");
@@ -114,7 +117,10 @@ async Task HandleClientAsync(TcpClient client)
                         weatherUpdated = data.WeatherUpdated, newsUpdated = data.NewsUpdated
                     });
                     var haInfo = JsonSerializer.Serialize(new {
-                        type = "ha-info", roomId = key, setpointF = setpoints.GetOrAdd(key, 70.0),
+                        type = "ha-info", roomId = key,
+                        setpointF = key == "GuestBedroom" ? ha.Current.GuestBedroomSetpointF : null,
+                        roomTempF = key == "GuestBedroom" ? ha.Current.GuestBedroomF : null,
+                        guestFloorOn = key == "GuestBedroom" ? ha.Current.GuestFloorOn : null,
                         status = ha.Current.Status, version = ha.Current.Version,
                         livingRoomTempF = ha.Current.LivingRoomF, kitchenTempF = ha.Current.KitchenF,
                         alerts = ha.Current.Alerts
