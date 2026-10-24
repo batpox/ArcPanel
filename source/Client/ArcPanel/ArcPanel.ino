@@ -164,7 +164,7 @@ void drawContent() {
     // Two large touch targets, with the requested temperature between them.
     gfx->fillRoundRect(135, 126, 85, 43, 9, ACCENT);
     drawChevron(177, 147, true, BG);
-    drawText(132, 180, String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
+    drawText(132, 180, !haveHaInfo && !pendingSetpoint ? "--" : String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
     drawText(206, 185, String(temperatureUnits), MUTED);
     gfx->fillRoundRect(135, 222, 85, 43, 9, ACCENT);
     drawChevron(177, 243, false, BG);
@@ -333,7 +333,7 @@ void pollTouch(unsigned long now) {
   } else if (selectedTab == 0) {
     // Half-degree increments in selected units; wire protocol remains Fahrenheit.
     if (x >= 130 && x <= 225) {
-      float step = temperatureUnits == 'C' ? 0.9f : 0.5f;
+      float step = temperatureUnits == 'C' ? 1.8f : 1.0f; // HA helper uses 1°F steps
       float requested = setpoint;
       if (y >= 122 && y <= 174) requested += step;
       else if (y >= 217 && y <= 270) requested -= step;
