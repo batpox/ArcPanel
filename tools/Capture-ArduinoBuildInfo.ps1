@@ -8,36 +8,79 @@ param(
     [string]$OutputPath = (Join-Path $PSScriptRoot '..\docs\BuildEnvironment.json')
 )
 $ErrorActionPreference = 'Stop'
-$serial = [System.IO.Ports.SerialPort]::new($Port, $BaudRate)
-$serial.ReadTimeout = 1000
-$serial.DtrEnable = $true
-$serial.RtsEnable = $false
 $inside = $false
 $payload = $null
 $receivedLines = 0
 $preview = [System.Collections.Generic.List[string]]::new()
+$buffer = ''
+$watch = [System.Diagnostics.Stopwatch]::StartNew()
+$serial = $null
+$completed = $false
+
 try {
-    $serial.Open()
-    Write-Host "Listening on $Port. Reset the ESP32 if its startup report has already passed."
-    $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        try { $line = $serial.ReadLine().Trim() }
-        catch [System.TimeoutException] { continue }
-        if ($line) {
-            $receivedLines++
-            if ($preview.Count -lt 12) { $preview.Add($line) }
-            Write-Verbose "Serial: $line"
+    Write-Host "Listening on $Port. Press the ESP32 RESET button after the port opens."
+    while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds -and -not $completed) {
+        if ($null -eq $serial -or -not $serial.IsOpen) {
+            try {
+                if ($null -ne $serial) { $serial.Dispose() }
+                $serial = [System.IO.Ports.SerialPort]::new($Port, $BaudRate)
+                $serial.ReadTimeout = 500
+                $serial.DtrEnable = $true
+                $serial.RtsEnable = $false
+                $serial.Open()
+                Write-Verbose "Opened $Port"
+            }
+            catch {
+                Write-Verbose "Waiting for serial port: $($_.Exception.Message)"
+                Start-Sleep -Milliseconds 400
+                continue
+            }
         }
-        if ($line -eq 'ARC_BUILD_INFO_BEGIN') { $inside = $true; continue }
-        if ($line -eq 'ARC_BUILD_INFO_END' -and $inside) { break }
-        if ($inside -and $line.StartsWith('{')) { $payload = $line }
+        try {
+            $chunk = $serial.ReadExisting()
+            if (-not $chunk) { Start-Sleep -Milliseconds 50; continue }
+            $buffer += $chunk
+            while ($buffer.Contains("`n")) {
+                $index = $buffer.IndexOf("`n")
+                $line = $buffer.Substring(0, $index).Trim()
+                $buffer = $buffer.Substring($index + 1)
+                if (-not $line) { continue }
+                $receivedLines++
+                if ($preview.Count -lt 12) { $preview.Add($line) }
+                Write-Verbose "Serial: $line"
+                if ($line -eq 'ARC_BUILD_INFO_BEGIN') {
+                    $inside = $true
+                    $payload = $null
+                    continue
+                }
+                if ($line -eq 'ARC_BUILD_INFO_END' -and $inside) {
+                    $completed = $true
+                    break
+                }
+                if ($inside -and $line.StartsWith('{')) { $payload = $line }
+            }
+        }
+        catch {
+            # ESP32-S3 native USB can briefly drop or cancel reads during reset.
+            Write-Verbose "Serial connection interrupted: $($_.Exception.Message). Reopening..."
+            try { $serial.Close() } catch {}
+            $serial.Dispose()
+            $serial = $null
+            $buffer = ''
+            Start-Sleep -Milliseconds 300
+        }
     }
-    if (-not $payload) {
+    if (-not $completed -or -not $payload) {
         $sample = $preview -join ' | '
-        throw "No firmware build manifest received in $TimeoutSeconds seconds ($receivedLines serial lines). Sample: $sample. Confirm updated firmware is uploaded, USB CDC On Boot is enabled, and press RESET while listening. Use -Verbose for all received lines."
+        throw "No complete firmware build manifest received in $TimeoutSeconds seconds ($receivedLines lines). First lines: $sample. Upload the latest firmware, enable USB CDC On Boot, and press RESET while listening."
     }
 }
-finally { if ($serial.IsOpen) { $serial.Close() }; $serial.Dispose() }
+finally {
+    if ($null -ne $serial) {
+        try { if ($serial.IsOpen) { $serial.Close() } } catch {}
+        $serial.Dispose()
+    }
+}
 $firmware = $payload | ConvertFrom-Json
 if ($firmware.schemaVersion -ne 1 -or -not $firmware.arduinoCoreVersion) {
     throw 'Invalid firmware build manifest; output file was not changed.'
