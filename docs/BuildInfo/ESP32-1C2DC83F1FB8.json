@@ -1,0 +1,23 @@
+{
+  "firmware": {
+    "schemaVersion": 1,
+    "deviceId": "ESP32-1C2DC83F1FB8",
+    "roomId": "MasterBedroom",
+    "platform": "ESP32",
+    "board": "Waveshare ESP32-S3-Touch-LCD-2",
+    "arduinoCoreVersion": "3.3.12",
+    "espIdfVersion": "v5.5.5",
+    "chipModel": "ESP32-S3",
+    "chipRevision": 2,
+    "cpuMHz": 240,
+    "flashBytes": 16777216,
+    "buildDate": "Nov  6 2026",
+    "buildTime": "10:56:02",
+    "arduinoJsonVersion": "7.4.3"
+  },
+  "server": {
+    "runtimeVersion": "10.0.14",
+    "framework": ".NET 10.0.14",
+    "os": "Microsoft Windows 10.0.26200"
+  }
+}
