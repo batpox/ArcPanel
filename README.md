@@ -138,3 +138,32 @@ failures show `Offline`. The access token is never sent to an ArcUnit.
 This is a first read-only REST connection, **not yet the full HA WebSocket
 subscription and action integration**. ARC setpoints still are not wired
 to HA heating controls.
+
+
+### GuestBedroom live Room tab (Home Assistant)
+
+Set `ROOM_ID "GuestBedroom"` in the panel's local `Secrets.h` (copy from
+`Secrets.example.h` if necessary). Set `ARC_HA_URL` and `ARC_HA_TOKEN`
+on the Windows server before launching it. For this installation the expected
+HA entities are:
+
+- `sensor.guest_bedroom_temperature` — authoritative temperature template sensor, currently sourcing the Govee
+- `input_number.guest_bedroom_temperature_setpoint` — editable setpoint helper (50–85°F, 1°F steps)
+- `switch.zen16a_boiler_3_2` — GuestFloor relay **read-only**
+
+The server polls HA every 30 seconds and sends `roomTempF`,
+`setpointF`, and nullable `guestFloorOn` in the existing `ha-info` message.
+The Room tab now displays HA temperature, HA setpoint, and the GuestFloor relay
+state. Unavailable temperature and relay states display `--`; fake temperature
+and humidity telemetry is no longer sent. Humidity remains unavailable until
+a real HA humidity source or SHT40 integration is configured.
+
+GuestBedroom setpoint changes from the panel call HA's
+`input_number.set_value` service; no switch-control service is used.
+HA remains the heating authority. ARC confirms the HA setpoint by rereading it,
+and a later HA poll synchronizes the panel. **This first integration uses
+30-second REST polling, not WebSocket updates**. Ensure the HA entity IDs
+above actually exist; renaming a helper does not necessarily rename its ID.
+
+Security: the HA long-lived token currently has broader privileges than
+setpoint-only access. Keep the token on the server, not on the panel.
