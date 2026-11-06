@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <Arduino_GFX_Library.h>
+#include <Adafruit_GFX.h> // Makes Arduino resolve the library that owns Fonts/*.h.
 #include <ArduinoJson.h>
 #include <esp_arduino_version.h>
 #include <math.h>
