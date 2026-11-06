@@ -5,8 +5,10 @@ using System.Text.Json;
 namespace ArcPanel.Server;
 
 // Read-only Home Assistant REST monitor. Never send credentials to ArcUnits.
+/// <summary>Polls Home Assistant and forwards validated sensor values and setpoint requests.</summary>
 internal sealed class HomeAssistantMonitor : IDisposable
 {
+    /// <summary>Represents the most recent Home Assistant status and sensor readings.</summary>
     internal sealed record Snapshot(string Status, string Version, double? LivingRoomF,
         double? KitchenF, string[] Alerts, double? GuestBedroomF, double? GuestBedroomSetpointF, bool? GuestFloorOn);
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
@@ -20,8 +22,10 @@ internal sealed class HomeAssistantMonitor : IDisposable
     private const string GuestRelayEntity = "switch.zen16a_boiler_3_2";
     private readonly object gate = new();
     private Snapshot snapshot = new("Not configured", "Unknown", null, null, [], null, null, null);
+    /// <summary>Gets the latest thread-safe cached snapshot.</summary>
     public Snapshot Current { get { lock (gate) return snapshot; } }
 
+    /// <summary>Runs the periodic background refresh loop until cancellation.</summary>
     public async Task RunAsync(CancellationToken cancellation, Action<string> log)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
@@ -58,6 +62,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
         catch (OperationCanceledException) { }
     }
 
+    /// <summary>Retrieves a JSON document from the Home Assistant REST API.</summary>
     private async Task<JsonDocument> ReadAsync(string path, CancellationToken cancellation)
     {
         using var response = await http.GetAsync(baseUrl + path, cancellation);
@@ -65,6 +70,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation));
     }
 
+    /// <summary>Reads a Home Assistant temperature entity and normalizes it to Fahrenheit.</summary>
     private async Task<double?> ReadTemperatureAsync(string? entity, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(entity)) return null;
@@ -78,6 +84,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
         return unit is "°C" or "C" ? value * 9.0 / 5.0 + 32 : unit is "°F" or "F" ? value : null;
     }
 
+    /// <summary>Reads an optional Home Assistant alert entity.</summary>
     private async Task<string[]> ReadAlertsAsync(string? entity, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(entity)) return [];
@@ -86,6 +93,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
         return state is null or "" or "off" or "0" or "unknown" or "unavailable" ? [] : [state];
     }
 
+    /// <summary>Reads a numeric Home Assistant entity.</summary>
     private async Task<double?> ReadNumberAsync(string entity, CancellationToken cancellation)
     {
         using var doc = await ReadAsync("/api/states/" + Uri.EscapeDataString(entity), cancellation);
@@ -95,6 +103,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
             ? value : null;
     }
 
+    /// <summary>Reads the current state of a Home Assistant switch without changing it.</summary>
     private async Task<bool?> ReadSwitchAsync(string entity, CancellationToken cancellation)
     {
         using var doc = await ReadAsync("/api/states/" + Uri.EscapeDataString(entity), cancellation);
@@ -106,6 +115,7 @@ internal sealed class HomeAssistantMonitor : IDisposable
         };
     }
 
+    /// <summary>Requests a GuestBedroom setpoint change through Home Assistant and verifies the accepted value.</summary>
     public async Task<bool> SetGuestBedroomSetpointAsync(double value, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token) ||
@@ -119,5 +129,6 @@ internal sealed class HomeAssistantMonitor : IDisposable
         return actual.HasValue && Math.Abs(actual.Value - value) < 0.51;
     }
 
+    /// <summary>Releases owned HTTP resources.</summary>
     public void Dispose() => http.Dispose();
 }
