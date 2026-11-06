@@ -5,6 +5,7 @@ using System.Xml.Linq;
 namespace ArcPanel.Server;
 
 // Shared, cached external information. Panels never contact public APIs directly.
+/// <summary>Collects and caches public information feeds for connected panels.</summary>
 internal sealed class InformationFeeds : IDisposable
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(12) };
@@ -12,6 +13,7 @@ internal sealed class InformationFeeds : IDisposable
     private readonly double latitude, longitude;
     private readonly string locationName;
     private Snapshot snapshot = new();
+    /// <summary>Initializes the information feed client and default location settings.</summary>
     public InformationFeeds()
     {
         latitude = double.TryParse(Environment.GetEnvironmentVariable("ARC_LATITUDE"), CultureInfo.InvariantCulture, out var lat) ? lat : 41.397;
@@ -20,6 +22,7 @@ internal sealed class InformationFeeds : IDisposable
         http.DefaultRequestHeaders.UserAgent.ParseAdd("ArcPanel/0.2 (local information display; contact: https://github.com/batpox/ArcPanel)");
     }
 
+    /// <summary>Represents the most recent Home Assistant status and sensor readings.</summary>
     internal sealed record Snapshot
     {
         public double? OutsideTempF { get; init; }
@@ -36,8 +39,10 @@ internal sealed class InformationFeeds : IDisposable
         public DateTimeOffset? NewsUpdated { get; init; }
     }
 
+    /// <summary>Gets the latest thread-safe cached snapshot.</summary>
     public Snapshot Current { get { lock (gate) return snapshot; } }
 
+    /// <summary>Runs the periodic background refresh loop until cancellation.</summary>
     public async Task RunAsync(CancellationToken token, Action<string> log)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
@@ -49,6 +54,7 @@ internal sealed class InformationFeeds : IDisposable
         } while (!token.IsCancellationRequested);
     }
 
+    /// <summary>Refreshes the cached weather, headlines, alerts, and market data.</summary>
     private async Task RefreshAsync(Action<string> log, CancellationToken token)
     {
         var current = Current;
@@ -126,6 +132,7 @@ internal sealed class InformationFeeds : IDisposable
         log($"Feeds refreshed: weather={(temperature.HasValue ? "available" : "unavailable")}, alerts={alerts.Length}, headlines={headlines.Length}, Dow={dow}, Nasdaq={nasdaq}");
     }
 
+    /// <summary>Retrieves a best-effort market index quote while retaining the previous value on failure.</summary>
     private async Task<string> FetchIndexAsync(string symbol, string previous, Action<string> log, CancellationToken token)
     {
         // Yahoo Finance chart data is an unofficial public endpoint and may rate-limit.
@@ -174,5 +181,6 @@ internal sealed class InformationFeeds : IDisposable
         return previous;
     }
 
+    /// <summary>Releases owned HTTP resources.</summary>
     public void Dispose() => http.Dispose();
 }
