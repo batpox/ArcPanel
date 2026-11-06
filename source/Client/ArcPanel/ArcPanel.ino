@@ -5,6 +5,9 @@
 #include <ArduinoJson.h>
 #include <esp_arduino_version.h>
 #include <math.h>
+#include <time.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
 #include "Secrets.h"
 
 // Waveshare ESP32-S3-Touch-LCD-2: ST7789 240x320 and CST816D (0x15).
@@ -45,8 +48,10 @@ String forecastTickerF = "Forecast pending", forecastTickerC = "Forecast pending
 String haStatus = "Not configured", haVersion = "Unknown", haAlerts = "";
 float haLivingF = NAN, haKitchenF = NAN;
 char temperatureUnits = 'F';
-unsigned long lastTickerDraw = 0, tickerStart = 0;
-static constexpr int TICKER_H = 23, TICKER_SPEED = 32;
+unsigned long lastTickerDraw = 0, tickerStart = 0, tickerPausedAt = 0, lastClockDraw = 0;
+bool tickerPaused = false;
+String lastClockMinute;
+static constexpr int TICKER_H = 30, TICKER_SPEED = 32;
 static constexpr uint16_t WEATHER_BLUE = 0x4DDF, FINANCE_GREEN = 0x07E0, HA_CYAN = 0x07FF;
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"Room", "House", "News", "Settings"};
@@ -114,6 +119,41 @@ void drawText(int x, int y, const String& s, uint16_t color, uint8_t scale = 1) 
   gfx->setTextColor(color);
   gfx->setCursor(x, y);
   gfx->print(s);
+}
+
+/**
+ * @brief Draws smooth proportional text using a bundled GFX font.
+ * @param x Left-side cursor position in pixels.
+ * @param baseline Baseline position in pixels.
+ * @param value Text to render.
+ * @param color RGB565 foreground color.
+ * @param large Selects the larger bold face.
+ */
+void DrawSmoothText(int x, int baseline, const String& value, uint16_t color, bool large = false) {
+  gfx->setFont(large ? &FreeSansBold12pt7b : &FreeSans9pt7b);
+  gfx->setTextSize(1);
+  gfx->setTextColor(color);
+  gfx->setCursor(x, baseline);
+  gfx->print(value);
+  gfx->setFont();
+}
+
+/**
+ * @brief Refreshes the local date and clock only when the displayed minute changes.
+ */
+void DrawRoomClock() {
+  if (!screenReady || selectedTab != 0) return;
+  struct tm local;
+  if (!getLocalTime(&local, 0)) return;
+  char timeText[24], dateText[32];
+  strftime(timeText, sizeof(timeText), "%I:%M %p", &local);
+  strftime(dateText, sizeof(dateText), "%a, %b %d, %Y", &local);
+  String minuteKey = String(dateText) + timeText;
+  if (minuteKey == lastClockMinute) return;
+  lastClockMinute = minuteKey;
+  gfx->fillRect(0, 72, SCREEN_W, 51, BG);
+  DrawSmoothText(9, 96, timeText, GREEN_TEXT, true);
+  DrawSmoothText(9, 118, dateText, GREEN_TEXT);
 }
 
 // High-contrast chevron, sized for a finger rather than a stylus.
@@ -195,22 +235,33 @@ void drawTabs() {
  * @param now now input or output value.
  */
 void drawTickerLine(const String& content, int y, uint16_t color, unsigned long now) {
-  const int glyphWidth = 12;
-  const int totalWidth = (int)content.length() * glyphWidth + SCREEN_W;
-  unsigned long elapsed = now - tickerStart;
-  unsigned long seconds = (elapsed / 1000UL) % totalWidth;
-  int offset = (seconds * TICKER_SPEED +
-                ((elapsed % 1000UL) * TICKER_SPEED) / 1000UL) % totalWidth;
+  // Proportional font: measure glyph advances rather than assuming 12px columns.
+  gfx->setFont(&FreeSansBold12pt7b);
+  gfx->setTextSize(1);
+  int16_t bx, by;
+  uint16_t bw, bh;
+  const int count = content.length();
+  int totalWidth = SCREEN_W;
+  for (int i = 0; i < count; ++i) {
+    gfx->getTextBounds(content.substring(i, i + 1), 0, 0, &bx, &by, &bw, &bh);
+    totalWidth += max(1, (int)bw + 1);
+  }
+  unsigned long elapsed = (tickerPaused ? tickerPausedAt : now) - tickerStart;
+  int offset = ((uint64_t)elapsed * TICKER_SPEED / 1000ULL) % max(1, totalWidth);
   int x = SCREEN_W - offset;
   gfx->fillRect(0, y, SCREEN_W, TICKER_H, PANEL);
-  gfx->setTextSize(2);
   gfx->setTextColor(color);
-  int first = max(0, (-x + glyphWidth - 1) / glyphWidth);
-  int last = min((int)content.length(), (SCREEN_W - x) / glyphWidth);
-  if (last > first) {
-    gfx->setCursor(x + first * glyphWidth, y + 3);
-    gfx->print(content.substring(first, last));
+  for (int i = 0; i < count && x < SCREEN_W; ++i) {
+    String letter = content.substring(i, i + 1);
+    gfx->getTextBounds(letter, 0, 0, &bx, &by, &bw, &bh);
+    int advance = max(1, (int)bw + 1);
+    if (x + advance >= 0) {
+      gfx->setCursor(x, y + 24);
+      gfx->print(letter);
+    }
+    x += advance;
   }
+  gfx->setFont();
 }
 
 /**
@@ -239,23 +290,25 @@ void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
     // Two-zone layout: live measurement left; adjustable target right.
-    drawText(9, 76, clipped(roomName, 19), ACCENT, 2);
-    gfx->fillRoundRect(7, 96, 106, 185, 10, PANEL);
-    gfx->fillRoundRect(122, 96, 111, 185, 10, PANEL);
-    drawText(19, 107, "Actual", MUTED);
-    drawText(130, 107, "Setpoint", MUTED);
+    lastClockMinute = "";
+    DrawRoomClock();
+    DrawSmoothText(9, 145, clipped(roomName, 20), ACCENT);
+    gfx->fillRoundRect(7, 151, 106, 131, 10, PANEL);
+    gfx->fillRoundRect(122, 151, 111, 131, 10, PANEL);
+    drawText(19, 157, "Actual", MUTED);
+    drawText(130, 157, "Setpoint", MUTED);
     // Large live temperature, with separate fractional digit.
-    drawText(13, 163, isnan(roomTemp) ? "--" : tempLabel(roomTemp), WHITE_TEXT, 2);
-    drawText(24, 207, String(temperatureUnits), GREEN_TEXT, 2);
-    drawText(17, 252, isnan(roomHumidity) ? "RH --" : "RH " + String(roomHumidity, 0) + "%", MUTED);
+    drawText(13, 195, isnan(roomTemp) ? "--" : tempLabel(roomTemp), WHITE_TEXT, 2);
+    drawText(24, 228, String(temperatureUnits), GREEN_TEXT, 2);
+    drawText(17, 259, isnan(roomHumidity) ? "RH --" : "RH " + String(roomHumidity, 0) + "%", MUTED);
     // Two large touch targets, with the requested temperature between them.
-    gfx->fillRoundRect(135, 126, 85, 43, 9, ACCENT);
-    drawChevron(177, 147, true, BG);
-    drawText(132, 180, !haveHaInfo && !pendingSetpoint ? "--" : String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
-    drawText(206, 185, String(temperatureUnits), MUTED);
-    gfx->fillRoundRect(135, 222, 85, 43, 9, ACCENT);
-    drawChevron(177, 243, false, BG);
-    if (pendingSetpoint) drawText(129, 273, "Pending", ACCENT);
+    gfx->fillRoundRect(135, 175, 85, 31, 9, ACCENT);
+    drawChevron(177, 190, true, BG);
+    drawText(132, 212, !haveHaInfo && !pendingSetpoint ? "--" : String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
+    drawText(206, 217, String(temperatureUnits), MUTED);
+    gfx->fillRoundRect(135, 232, 85, 31, 9, ACCENT);
+    drawChevron(177, 247, false, BG);
+    if (pendingSetpoint) drawText(129, 267, "Pending", ACCENT);
     else drawText(129, 273, guestFloorState < 0 ? "Heat: --" : (guestFloorState ? "Heat: ON" : "Heat: OFF"), MUTED);
   } else if (selectedTab == 1) {
     drawText(12, 76, "ARC House", ACCENT, 2);
@@ -436,6 +489,11 @@ void pollTouch(unsigned long now) {
       dirty = true;
       logMessage(String("Selected tab: ") + tabNames[tab]);
     }
+  } else if (selectedTab == 2 && ((y >= 116 && y < 146) || (y >= 176 && y < 206))) {
+    tickerPaused = !tickerPaused;
+    if (tickerPaused) tickerPausedAt = now;
+    else tickerStart += now - tickerPausedAt;
+    drawTickers(now);
   } else if (selectedTab == 3) {
     if (x >= 12 && x <= 228 && y >= 237 && y <= 289) {
       temperatureUnits = temperatureUnits == 'F' ? 'C' : 'F';
@@ -448,8 +506,8 @@ void pollTouch(unsigned long now) {
     if (x >= 130 && x <= 225) {
       float step = temperatureUnits == 'C' ? 1.8f : 1.0f; // HA helper uses 1°F steps
       float requested = setpoint;
-      if (y >= 122 && y <= 174) requested += step;
-      else if (y >= 217 && y <= 270) requested -= step;
+      if (y >= 175 && y <= 208) requested += step;
+      else if (y >= 232 && y <= 264) requested -= step;
       requested = constrain(requested, 50.0f, 85.0f);
       if (fabsf(requested - setpoint) >= 0.25f) {
         setpoint = requested;
@@ -491,6 +549,8 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Eastern time with automatic DST; NTP runs in the background after Wi-Fi connects.
+  configTzTime("EST5EDT,M3.2.0/2,M11.1.0/2", "pool.ntp.org", "time.nist.gov");
   logMessage("Wi-Fi connecting...");
 }
 
@@ -578,6 +638,7 @@ void loop() {
     }
   }
   if (dirty) drawScreen();
+  if (selectedTab == 0 && now - lastClockDraw >= 1000) { DrawRoomClock(); lastClockDraw = now; }
   else if (screenReady) drawStatus();
   if (screenReady && (selectedTab == 1 || selectedTab == 2) && now - lastTickerDraw >= 80) {
     drawTickers(now);
