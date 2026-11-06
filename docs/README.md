@@ -8,4 +8,4 @@
 - [Project README](../README.md) — implementation history and configuration examples.
 - [Images](images/README.md) — reserved location for screenshots and diagrams.
 
-Documentation standards: record **IDE name and version** (and board/toolchain versions where applicable); use C# XML `<summary>` comments for public and asynchronous methods and Doxygen-style `@brief`, `@param`, `@return` comments for Arduino C++ functions. Update version details when the toolchain changes.
+Documentation standards: record **IDE name and version** (and board/toolchain versions where applicable); use C# XML `<summary>` comments for public methods, `Task`-returning methods, and substantial asynchronous routines and Doxygen-style `@brief`, `@param`, `@return` comments for Arduino C++ functions. Update version details when the toolchain changes.
