@@ -250,7 +250,8 @@ void drawTickerLine(const String& content, int y, uint16_t color, unsigned long 
   unsigned long elapsed = (tickerPaused ? tickerPausedAt : now) - tickerStart;
   int offset = ((uint64_t)elapsed * TICKER_SPEED / 1000ULL) % max(1, totalWidth);
   int x = SCREEN_W - offset;
-  gfx->fillRect(0, y, SCREEN_W, TICKER_H, PANEL);
+  // Match the News tab background; a contrasting ticker strip looked like a colored block.
+  gfx->fillRect(0, y, SCREEN_W, TICKER_H, BG);
   gfx->setTextColor(color);
   for (int i = 0; i < count && x < SCREEN_W; ++i) {
     String letter = content.substring(i, i + 1);
