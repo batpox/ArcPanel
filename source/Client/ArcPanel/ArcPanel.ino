@@ -236,32 +236,37 @@ void drawTabs() {
  * @param now now input or output value.
  */
 void drawTickerLine(const String& content, int y, uint16_t color, unsigned long now) {
-  // Proportional font: measure glyph advances rather than assuming 12px columns.
-  gfx->setFont(&FreeSansBold12pt7b);
+  // GFXfont glyph widths are ink bounds, not cursor advances. In particular,
+  // spaces have no ink width but do have xAdvance.
+  const GFXfont* font = &FreeSansBold12pt7b;
+  gfx->setFont(font);
   gfx->setTextSize(1);
-  int16_t bx, by;
-  uint16_t bw, bh;
   const int count = content.length();
   int totalWidth = SCREEN_W;
   for (int i = 0; i < count; ++i) {
-    gfx->getTextBounds(content.substring(i, i + 1), 0, 0, &bx, &by, &bw, &bh);
-    totalWidth += max(1, (int)bw + 1);
+    const unsigned char ch = static_cast<unsigned char>(content[i]);
+    if (ch >= font->first && ch <= font->last) {
+      totalWidth += pgm_read_byte(&font->glyph[ch - font->first].xAdvance);
+    }
   }
-  unsigned long elapsed = (tickerPaused ? tickerPausedAt : now) - tickerStart;
-  int offset = ((uint64_t)elapsed * TICKER_SPEED / 1000ULL) % max(1, totalWidth);
+
+  const unsigned long elapsed = (tickerPaused ? tickerPausedAt : now) - tickerStart;
+  const int offset = ((uint64_t)elapsed * TICKER_SPEED / 1000ULL) % max(1, totalWidth);
   int x = SCREEN_W - offset;
-  // Match the News tab background; a contrasting ticker strip looked like a colored block.
   gfx->fillRect(0, y, SCREEN_W, TICKER_H, BG);
   gfx->setTextColor(color);
+
   for (int i = 0; i < count && x < SCREEN_W; ++i) {
-    String letter = content.substring(i, i + 1);
-    gfx->getTextBounds(letter, 0, 0, &bx, &by, &bw, &bh);
-    int advance = max(1, (int)bw + 1);
-    // Arduino_GFX can render corrupt rectangles when a proportional glyph starts
-    // off the left edge. Skip partially visible glyphs rather than drawing at x < 0.
-    if (x >= 0 && x + advance <= SCREEN_W) {
+    const unsigned char ch = static_cast<unsigned char>(content[i]);
+    if (ch < font->first || ch > font->last) continue;
+    const GFXglyph* glyph = &font->glyph[ch - font->first];
+    const int advance = pgm_read_byte(&glyph->xAdvance);
+    const int glyphX = x + static_cast<int8_t>(pgm_read_byte(&glyph->xOffset));
+    const int glyphW = pgm_read_byte(&glyph->width);
+    // Never send a partially offscreen glyph to the display driver.
+    if (glyphX >= 0 && glyphX + glyphW <= SCREEN_W) {
       gfx->setCursor(x, y + 24);
-      gfx->print(letter);
+      gfx->write(ch);
     }
     x += advance;
   }
