@@ -38,8 +38,8 @@ In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Ardui
 
 ## Code Documentation Standard
 
-- C#: use XML `/// <summary>` for all public methods and asynchronous methods (including private async helpers), with `<param>` and `<returns>` where they clarify behavior. This provides IntelliSense tooltips.
-- Arduino C++: use Doxygen-compatible `/** ... */` with `@brief`, relevant `@param`, and `@return`. Keep hardware assumptions and units explicit.
+- C#: use XML `/// <summary>` for all public methods, all methods returning `Task` or `Task<T>`, and substantial asynchronous routines, with `<param>` and `<returns>` where they clarify behavior. This provides IntelliSense tooltips.
+- Arduino C++: document public-facing functions and substantial internal routines using Doxygen-compatible `/** ... */` with `@brief`, relevant `@param`, and `@return`. Keep hardware assumptions and units explicit.
 - Record IDE and SDK versions in this guide when upgrading.
 - Prefer timestamped diagnostics on both sides, maintain protocol compatibility, and do not log credentials.
 
