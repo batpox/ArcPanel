@@ -34,21 +34,15 @@ dotnet build source/Server/ArcPanel.Server.slnx
 dotnet run --project source/Server/ArcPanel.Server
 ```
 
-In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Arduino, and ArduinoJson 7. Select **ESP32S3 Dev Module**, enable **USB CDC On Boot**, upload `ArcPanel.ino`, and monitor serial at **115200 baud**. The Windows server can use Ethernet while the panel uses Wi-Fi if both are on a reachable trusted LAN.
+In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Arduino, and ArduinoJson 7. Select **ESP32S3 Dev Module**, retain the board's existing **USB CDC On Boot** setting, upload `ArcPanel.ino`, and monitor serial at **115200 baud**. The Windows server can use Ethernet while the panel uses Wi-Fi if both are on a reachable trusted LAN.
 
-## Capture a Git-Trackable Arduino Build Manifest
+## Record Arduino Build Environment
 
-Firmware calls `LogBuildInfo()` during `setup()` and emits JSON between `ARC_BUILD_INFO_BEGIN` and `ARC_BUILD_INFO_END` on the USB serial port. The report contains ESP32 Arduino core version, ESP-IDF version, chip model/revision, CPU frequency, flash size, ArduinoJson version, and compilation date/time. It deliberately excludes Wi-Fi credentials, tokens, device identifiers, and network addresses.
+**Preserve the working board configuration, including USB CDC On Boot = Disabled.** Do not enable USB CDC merely to collect metadata. With CDC disabled, firmware `Serial` output is not necessarily available on the USB programming port; the boot ROM messages are not application output.
 
-After uploading firmware, **close Arduino Serial Monitor** (only one application can own COM6 at a time). From the repository root, run:
+Use Arduino IDE **Help → About** for the IDE version and **Boards Manager → esp32 by Espressif Systems** for the installed board core version. Record these in the table above. Library versions can be checked in **Library Manager**. The existing `tools/Capture-ArduinoBuildInfo.ps1` is an **optional** serial-based capture utility and is not compatible with the current USB configuration unless an appropriate application serial interface is provided. Do not treat a failed serial capture as a firmware upload failure.
 
-```powershell
-.\tools\Capture-ArduinoBuildInfo.ps1 -Port COM6
-```
-
-Reset the ArcUnit if necessary so the script sees its startup report. The script saves `docs/BuildEnvironment.json`, which is **intended to be committed**. It also attempts to read the installed Arduino IDE version from the standard Windows application location and lists locally installed ESP32 core package versions. Missing host metadata is recorded as null or empty rather than guessed. The compiled firmware core version is the authoritative one when multiple core versions are installed.
-
-The JSON file is generated **on your development PC**, not written to Git directly by the ESP32. Inspect it in GitHub Desktop and commit normally. Repeat after toolchain upgrades or significant firmware changes. The script requires Windows PowerShell with `System.IO.Ports`, an available USB serial port, and Arduino **USB CDC On Boot** enabled.
+A host-only manifest generator that records these settings without opening a serial port is planned; no JSON is generated automatically by the current build.
 
 ## Code Documentation Standard
 
