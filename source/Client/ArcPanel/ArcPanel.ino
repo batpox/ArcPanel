@@ -61,31 +61,6 @@ void logMessage(const String& message) {
 }
 
 /**
- * @brief Emits optional serial diagnostics containing non-secret firmware build metadata.
- * @details One JSON object is printed between stable markers at startup; no device IDs or credentials are included.
- */
-void LogBuildInfo() {
-  JsonDocument info;
-  info["schemaVersion"] = 1;
-  info["platform"] = "ESP32";
-  info["board"] = "Waveshare ESP32-S3-Touch-LCD-2";
-  info["arduinoCoreVersion"] = ESP_ARDUINO_VERSION_STR;
-  info["espIdfVersion"] = ESP.getSdkVersion();
-  info["chipModel"] = ESP.getChipModel();
-  info["chipRevision"] = ESP.getChipRevision();
-  info["cpuMHz"] = ESP.getCpuFreqMHz();
-  info["flashBytes"] = ESP.getFlashChipSize();
-  info["buildDate"] = __DATE__;
-  info["buildTime"] = __TIME__;
-  info["arduinoJsonVersion"] = String(ARDUINOJSON_VERSION_MAJOR) + "." +
-      String(ARDUINOJSON_VERSION_MINOR) + "." + String(ARDUINOJSON_VERSION_REVISION);
-  Serial.println("ARC_BUILD_INFO_BEGIN");
-  serializeJson(info, Serial);
-  Serial.println();
-  Serial.println("ARC_BUILD_INFO_END");
-}
-
-/**
  * @brief Sends the firmware build metadata once per TCP connection.
  * @details Uses the existing newline-delimited JSON protocol; no USB CDC or secrets required.
  * @return True when the complete message was accepted by the TCP client.
@@ -493,11 +468,6 @@ void pollTouch(unsigned long now) {
  */
 void setup() {
   Serial.begin(115200);
-  // Native USB CDC can enumerate after setup starts; wait briefly for the host.
-  unsigned long serialWaitStarted = millis();
-  while (!Serial && millis() - serialWaitStarted < 5000) delay(25);
-  delay(500);
-  LogBuildInfo();
   preferences.begin("arcpanel", false);
   uint64_t mac = ESP.getEfuseMac();
   char id[32];
