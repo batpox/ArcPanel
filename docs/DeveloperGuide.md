@@ -12,7 +12,7 @@
 | Firmware graphics | GFX Library for Arduino | Installed version not recorded |
 | Hardware | Waveshare ESP32-S3-Touch-LCD-2 | 2.0-inch model, ST7789 / CST816D |
 
-Do not infer an exact IDE build or board-package revision from source files. Record the installed versions before reproducing a hardware-specific issue.
+Do not infer an exact IDE build or board-package revision from source files. Use the startup build-manifest capture procedure below to record installed versions.
 
 ## Repository Structure
 
@@ -35,6 +35,20 @@ dotnet run --project source/Server/ArcPanel.Server
 ```
 
 In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Arduino, and ArduinoJson 7. Select **ESP32S3 Dev Module**, enable **USB CDC On Boot**, upload `ArcPanel.ino`, and monitor serial at **115200 baud**. The Windows server can use Ethernet while the panel uses Wi-Fi if both are on a reachable trusted LAN.
+
+## Capture a Git-Trackable Arduino Build Manifest
+
+Firmware calls `LogBuildInfo()` during `setup()` and emits JSON between `ARC_BUILD_INFO_BEGIN` and `ARC_BUILD_INFO_END` on the USB serial port. The report contains ESP32 Arduino core version, ESP-IDF version, chip model/revision, CPU frequency, flash size, ArduinoJson version, and compilation date/time. It deliberately excludes Wi-Fi credentials, tokens, device identifiers, and network addresses.
+
+After uploading firmware, **close Arduino Serial Monitor** (only one application can own COM6 at a time). From the repository root, run:
+
+```powershell
+.\tools\Capture-ArduinoBuildInfo.ps1 -Port COM6
+```
+
+Reset the ArcUnit if necessary so the script sees its startup report. The script saves `docs/BuildEnvironment.json`, which is **intended to be committed**. It also attempts to read the installed Arduino IDE version from the standard Windows application location and lists locally installed ESP32 core package versions. Missing host metadata is recorded as null or empty rather than guessed. The compiled firmware core version is the authoritative one when multiple core versions are installed.
+
+The JSON file is generated **on your development PC**, not written to Git directly by the ESP32. Inspect it in GitHub Desktop and commit normally. Repeat after toolchain upgrades or significant firmware changes. The script requires Windows PowerShell with `System.IO.Ports`, an available USB serial port, and Arduino **USB CDC On Boot** enabled.
 
 ## Code Documentation Standard
 
