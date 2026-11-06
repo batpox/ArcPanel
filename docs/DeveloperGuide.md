@@ -58,3 +58,7 @@ There is no dedicated automated test project in this repository at this checkpoi
 ## Related
 
 [Architecture](Architecture.md) · [Protocol](Protocol.md) · [User Guide](UserGuide.md)
+
+## ArcUnit Display Updates
+
+Room now displays a green, smooth-font local time and date above a smooth-font room name. Time is synchronized using NTP and the `EST5EDT` timezone rule (automatic daylight saving transitions); the clock remains blank until time synchronization succeeds. The Room controls were compacted to make space. News weather and financial tickers use larger proportional fonts; tap either ticker to pause or resume both. The ticker remains paused until tapped again. The firmware uses GFX FreeSans fonts; ensure the headers are available in the Arduino build environment.
