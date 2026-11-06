@@ -257,7 +257,9 @@ void drawTickerLine(const String& content, int y, uint16_t color, unsigned long 
     String letter = content.substring(i, i + 1);
     gfx->getTextBounds(letter, 0, 0, &bx, &by, &bw, &bh);
     int advance = max(1, (int)bw + 1);
-    if (x + advance >= 0) {
+    // Arduino_GFX can render corrupt rectangles when a proportional glyph starts
+    // off the left edge. Skip partially visible glyphs rather than drawing at x < 0.
+    if (x >= 0 && x + advance <= SCREEN_W) {
       gfx->setCursor(x, y + 24);
       gfx->print(letter);
     }
