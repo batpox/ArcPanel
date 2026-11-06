@@ -465,7 +465,10 @@ void pollTouch(unsigned long now) {
  */
 void setup() {
   Serial.begin(115200);
-  delay(750); // Allow USB CDC serial monitor to attach after reset.
+  // Native USB CDC can enumerate after setup starts; wait briefly for the host.
+  unsigned long serialWaitStarted = millis();
+  while (!Serial && millis() - serialWaitStarted < 5000) delay(25);
+  delay(500);
   LogBuildInfo();
   preferences.begin("arcpanel", false);
   uint64_t mac = ESP.getEfuseMac();
