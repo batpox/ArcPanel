@@ -50,14 +50,36 @@ static constexpr uint16_t WEATHER_BLUE = 0x4DDF, FINANCE_GREEN = 0x07E0, HA_CYAN
 uint8_t selectedTab = 0;
 const char* tabNames[] = {"Room", "House", "News", "Settings"};
 
+/**
+ * @brief Writes an uptime-stamped message to the serial monitor.
+ * @param message message input or output value.
+ */
 void logMessage(const String& message) {
   unsigned long ms = millis();
   Serial.printf("[%lu.%03lu] %s\n", ms / 1000, ms % 1000, message.c_str());
 }
 
+/**
+ * @brief Converts a Fahrenheit temperature to the selected display units.
+ * @param fahrenheit fahrenheit input or output value.
+ * @return The computed value or operation result.
+ */
 float displayTemp(float fahrenheit) { return temperatureUnits == 'C' ? (fahrenheit - 32.0f) * 5.0f / 9.0f : fahrenheit; }
+/**
+ * @brief Formats a Fahrenheit temperature with its selected unit.
+ * @param fahrenheit fahrenheit input or output value.
+ * @return The computed value or operation result.
+ */
 String tempLabel(float fahrenheit) { return String(displayTemp(fahrenheit), 1) + String(temperatureUnits); }
 
+/**
+ * @brief Draws scaled text at a display coordinate.
+ * @param x x input or output value.
+ * @param y y input or output value.
+ * @param s s input or output value.
+ * @param color color input or output value.
+ * @param scale scale input or output value.
+ */
 void drawText(int x, int y, const String& s, uint16_t color, uint8_t scale = 1) {
   gfx->setTextSize(scale);
   gfx->setTextColor(color);
@@ -66,6 +88,13 @@ void drawText(int x, int y, const String& s, uint16_t color, uint8_t scale = 1) 
 }
 
 // High-contrast chevron, sized for a finger rather than a stylus.
+/**
+ * @brief Draws a directional setpoint control chevron.
+ * @param cx cx input or output value.
+ * @param cy cy input or output value.
+ * @param up up input or output value.
+ * @param color color input or output value.
+ */
 void drawChevron(int cx, int cy, bool up, uint16_t color) {
   int tipY = up ? cy - 10 : cy + 10;
   int baseY = up ? cy + 7 : cy - 7;
@@ -76,11 +105,23 @@ void drawChevron(int cx, int cy, bool up, uint16_t color) {
 }
 
 // Layout is intentionally based on SCREEN_W/SCREEN_H, ready for display profiles.
+/**
+ * @brief Truncates text to the specified display character count.
+ * @param value value input or output value.
+ * @param maxChars maxChars input or output value.
+ * @return The computed value or operation result.
+ */
 String clipped(const String& value, int maxChars) {
   return value.length() <= (unsigned)maxChars ? value : value.substring(0, maxChars);
 }
 
 // Simple vector gear: independent of installed fonts and display resolution.
+/**
+ * @brief Draws the settings gear icon.
+ * @param cx cx input or output value.
+ * @param cy cy input or output value.
+ * @param color color input or output value.
+ */
 void drawSettingsGear(int cx, int cy, uint16_t color) {
   gfx->fillCircle(cx, cy, 15, color);
   for (int i = 0; i < 8; ++i) {
@@ -95,6 +136,9 @@ void drawSettingsGear(int cx, int cy, uint16_t color) {
   gfx->fillCircle(cx, cy, 7, selectedTab == 3 ? ACCENT : PANEL);
 }
 
+/**
+ * @brief Draws the four touch-selectable navigation tabs.
+ */
 void drawTabs() {
   for (int i = 0; i < 4; ++i) {
     int x = i * 60;
@@ -114,6 +158,13 @@ void drawTabs() {
 
 // 2x text (12x16 pixels), matching the Franklin, PA header.
 // Independently scroll weather, financial and HA information in their own rows.
+/**
+ * @brief Draws one scrolling ticker line at the requested vertical position.
+ * @param content content input or output value.
+ * @param y y input or output value.
+ * @param color color input or output value.
+ * @param now now input or output value.
+ */
 void drawTickerLine(const String& content, int y, uint16_t color, unsigned long now) {
   const int glyphWidth = 12;
   const int totalWidth = (int)content.length() * glyphWidth + SCREEN_W;
@@ -133,6 +184,10 @@ void drawTickerLine(const String& content, int y, uint16_t color, unsigned long 
   }
 }
 
+/**
+ * @brief Draws the weather, financial, and Home Assistant ticker content.
+ * @param now now input or output value.
+ */
 void drawTickers(unsigned long now) {
   if (!screenReady) return;
   if (selectedTab == 2) {
@@ -148,6 +203,9 @@ void drawTickers(unsigned long now) {
   }
 }
 
+/**
+ * @brief Draws the currently selected tab content.
+ */
 void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
   if (selectedTab == 0) {
@@ -198,6 +256,9 @@ void drawContent() {
   if (selectedTab == 1 || selectedTab == 2) drawTickers(millis());
 }
 
+/**
+ * @brief Refreshes the changing Settings telemetry without redrawing the entire screen.
+ */
 void updateSettingsTelemetry() {
   if (!screenReady || selectedTab != 3) return;
   gfx->fillRect(8, 152, 226, 55, BG);
@@ -205,6 +266,9 @@ void updateSettingsTelemetry() {
   drawText(12, 185, String("ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT, BODY_SCALE);
 }
 
+/**
+ * @brief Draws the current connectivity and status indicators.
+ */
 void drawStatus() {
   String status = WiFi.status() != WL_CONNECTED ? "Wi-Fi offline" :
                   client.connected() ? "TCP connected" : "TCP disconnected";
@@ -215,6 +279,9 @@ void drawStatus() {
   lastStatus = status;
 }
 
+/**
+ * @brief Renders the complete ArcUnit screen.
+ */
 void drawScreen() {
   if (!screenReady) return;
   // Full repaint only when changing tabs, not for heartbeat/ACK updates.
@@ -227,6 +294,9 @@ void drawScreen() {
   lastDraw = millis();
 }
 
+/**
+ * @brief Refreshes the current tab content when needed.
+ */
 void refreshContent() {
   if (!screenReady) return;
   drawContent();
@@ -234,6 +304,10 @@ void refreshContent() {
   lastDraw = millis();
 }
 
+/**
+ * @brief Parses an incoming JSON protocol message and updates cached display state.
+ * @param line line input or output value.
+ */
 void handleServerMessage(const String& line) {
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, line);
@@ -299,6 +373,12 @@ void handleServerMessage(const String& line) {
 
 // CST816D touch reports coordinates in registers 0x03..0x06.
 // Polling avoids a dependency on a board-specific touch library.
+/**
+ * @brief Reads the touch controller and returns the detected coordinates.
+ * @param x x input or output value.
+ * @param y y input or output value.
+ * @return The computed value or operation result.
+ */
 bool readTouch(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(TOUCH_ADDR);
   Wire.write((uint8_t)0x02);
@@ -312,6 +392,10 @@ bool readTouch(uint16_t& x, uint16_t& y) {
   return x < SCREEN_W && y < SCREEN_H;
 }
 
+/**
+ * @brief Processes touch input, including tabs, setpoint controls, and settings.
+ * @param now now input or output value.
+ */
 void pollTouch(unsigned long now) {
   if (now - lastTouch < 200) return;
   uint16_t x, y;
@@ -350,6 +434,9 @@ void pollTouch(unsigned long now) {
   lastTouch = now;
 }
 
+/**
+ * @brief Initializes serial diagnostics, hardware, stored settings, Wi-Fi, and display.
+ */
 void setup() {
   Serial.begin(115200);
   preferences.begin("arcpanel", false);
@@ -378,6 +465,9 @@ void setup() {
   logMessage("Wi-Fi connecting...");
 }
 
+/**
+ * @brief Runs the Arduino event loop, network heartbeat, touch polling, and display updates.
+ */
 void loop() {
   unsigned long now = millis();
   pollTouch(now);
