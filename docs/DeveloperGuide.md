@@ -12,7 +12,7 @@
 | Firmware graphics | GFX Library for Arduino | Installed version not recorded |
 | Hardware | Waveshare ESP32-S3-Touch-LCD-2 | 2.0-inch model, ST7789 / CST816D |
 
-Do not infer an exact IDE build or board-package revision from source files. Use the startup build-manifest capture procedure below to record installed versions.
+Do not infer an exact IDE build or board-package revision from source files. Firmware build metadata is captured automatically over TCP; IDE versions can be recorded manually.
 
 ## Repository Structure
 
@@ -36,13 +36,13 @@ dotnet run --project source/Server/ArcPanel.Server
 
 In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Arduino, and ArduinoJson 7. Select **ESP32S3 Dev Module**, retain the board's existing **USB CDC On Boot** setting, upload `ArcPanel.ino`, and monitor serial at **115200 baud**. The Windows server can use Ethernet while the panel uses Wi-Fi if both are on a reachable trusted LAN.
 
-## Record Arduino Build Environment
+## Automatic Build Metadata
 
-**Preserve the working board configuration, including USB CDC On Boot = Disabled.** Do not enable USB CDC merely to collect metadata. With CDC disabled, firmware `Serial` output is not necessarily available on the USB programming port; the boot ROM messages are not application output.
+The ArcUnit sends a `build-info` JSON message immediately after each successful TCP connection, before the first heartbeat. The server stores a per-device manifest in `docs/BuildInfo/<deviceId>.json` when run from the repository. For deployments outside the repository, it defaults to a `BuildInfo` subfolder beside the server binary. Override the destination using `ARC_BUILD_INFO_DIRECTORY`.
 
-Use Arduino IDE **Help → About** for the IDE version and **Boards Manager → esp32 by Espressif Systems** for the installed board core version. Record these in the table above. Library versions can be checked in **Library Manager**. The existing `tools/Capture-ArduinoBuildInfo.ps1` is an **optional** serial-based capture utility and is not compatible with the current USB configuration unless an appropriate application serial interface is provided. Do not treat a failed serial capture as a firmware upload failure.
+Each manifest records the firmware build date/time, ESP32 Arduino core, ESP-IDF, ArduinoJson, chip information, and server .NET runtime/OS. The server writes only an explicit allowlist of non-secret fields and updates the file only when content changes. The JSON files may be committed using GitHub Desktop. No serial monitor, reset, or IDE setting change is required. **Keep USB CDC On Boot disabled** as in the working configuration.
 
-A host-only manifest generator that records these settings without opening a serial port is planned; no JSON is generated automatically by the current build.
+The Arduino IDE version is not available in compiled firmware. The build date gives useful context; record an exact IDE version manually only if needed.
 
 ## Code Documentation Standard
 
