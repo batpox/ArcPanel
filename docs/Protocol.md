@@ -49,3 +49,13 @@ These values come from an optional, read-only Home Assistant REST monitor.
 Until `ARC_HA_URL`, `ARC_HA_TOKEN` and relevant exact sensor entity IDs
 are configured, status is `Not configured` and temperatures are null.
 See README for configuration. HA version above is illustrative only.
+
+## Firmware build metadata
+
+On each TCP connection the ArcUnit sends a one-time `build-info` message before heartbeats:
+
+```json
+{"type":"build-info","schemaVersion":1,"deviceId":"ESP32-001122334455","roomId":"GuestBedroom","platform":"ESP32","board":"Waveshare ESP32-S3-Touch-LCD-2","arduinoCoreVersion":"3.x","espIdfVersion":"5.x","chipModel":"ESP32-S3","chipRevision":0,"cpuMHz":240,"flashBytes":8388608,"buildDate":"Nov 6 2026","buildTime":"10:00:00","arduinoJsonVersion":"7.4.3"}
+```
+
+Version strings and numeric values above are illustrative. The server acknowledges the message normally and persists an allowlisted per-device JSON manifest. See [Developer Guide](DeveloperGuide.md) for the output path and override. USB CDC is not required.
