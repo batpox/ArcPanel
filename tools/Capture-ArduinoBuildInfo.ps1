@@ -14,6 +14,8 @@ $serial.DtrEnable = $true
 $serial.RtsEnable = $false
 $inside = $false
 $payload = $null
+$receivedLines = 0
+$preview = [System.Collections.Generic.List[string]]::new()
 try {
     $serial.Open()
     Write-Host "Listening on $Port. Reset the ESP32 if its startup report has already passed."
@@ -21,11 +23,19 @@ try {
     while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         try { $line = $serial.ReadLine().Trim() }
         catch [System.TimeoutException] { continue }
+        if ($line) {
+            $receivedLines++
+            if ($preview.Count -lt 12) { $preview.Add($line) }
+            Write-Verbose "Serial: $line"
+        }
         if ($line -eq 'ARC_BUILD_INFO_BEGIN') { $inside = $true; continue }
         if ($line -eq 'ARC_BUILD_INFO_END' -and $inside) { break }
         if ($inside -and $line.StartsWith('{')) { $payload = $line }
     }
-    if (-not $payload) { throw "No firmware build manifest received. Check port, USB CDC On Boot, and reset the panel." }
+    if (-not $payload) {
+        $sample = $preview -join ' | '
+        throw "No firmware build manifest received in $TimeoutSeconds seconds ($receivedLines serial lines). Sample: $sample. Confirm updated firmware is uploaded, USB CDC On Boot is enabled, and press RESET while listening. Use -Verbose for all received lines."
+    }
 }
 finally { if ($serial.IsOpen) { $serial.Close() }; $serial.Dispose() }
 $firmware = $payload | ConvertFrom-Json
