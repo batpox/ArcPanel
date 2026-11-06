@@ -8,7 +8,7 @@
 #include "Secrets.h"
 
 // Waveshare ESP32-S3-Touch-LCD-2: ST7789 240x320 and CST816D (0x15).
-// Arduino IDE: ESP32S3 Dev Module, USB CDC On Boot enabled.
+// Arduino IDE: ESP32S3 Dev Module, USB CDC On Boot disabled (preserve working configuration).
 // Install "GFX Library for Arduino" using Library Manager.
 static constexpr uint16_t SERVER_PORT = 5000;
 static constexpr unsigned long SEND_MS = 2000;
@@ -61,7 +61,7 @@ void logMessage(const String& message) {
 }
 
 /**
- * @brief Emits a machine-readable, non-secret firmware build manifest for the repository capture script.
+ * @brief Emits optional serial diagnostics containing non-secret firmware build metadata.
  * @details One JSON object is printed between stable markers at startup; no device IDs or credentials are included.
  */
 void LogBuildInfo() {
@@ -83,6 +83,34 @@ void LogBuildInfo() {
   serializeJson(info, Serial);
   Serial.println();
   Serial.println("ARC_BUILD_INFO_END");
+}
+
+/**
+ * @brief Sends the firmware build metadata once per TCP connection.
+ * @details Uses the existing newline-delimited JSON protocol; no USB CDC or secrets required.
+ * @return True when the complete message was accepted by the TCP client.
+ */
+bool SendBuildInfo() {
+  JsonDocument info;
+  info["type"] = "build-info";
+  info["schemaVersion"] = 1;
+  info["deviceId"] = deviceId;
+  info["roomId"] = roomId;
+  info["platform"] = "ESP32";
+  info["board"] = "Waveshare ESP32-S3-Touch-LCD-2";
+  info["arduinoCoreVersion"] = ESP_ARDUINO_VERSION_STR;
+  info["espIdfVersion"] = ESP.getSdkVersion();
+  info["chipModel"] = ESP.getChipModel();
+  info["chipRevision"] = ESP.getChipRevision();
+  info["cpuMHz"] = ESP.getCpuFreqMHz();
+  info["flashBytes"] = ESP.getFlashChipSize();
+  info["buildDate"] = __DATE__;
+  info["buildTime"] = __TIME__;
+  info["arduinoJsonVersion"] = String(ARDUINOJSON_VERSION_MAJOR) + "." +
+      String(ARDUINOJSON_VERSION_MINOR) + "." + String(ARDUINOJSON_VERSION_REVISION);
+  String payload;
+  serializeJson(info, payload);
+  return client.println(payload) == payload.length() + 2;
 }
 
 /**
@@ -526,6 +554,10 @@ void loop() {
         logMessage("Connecting TCP...");
         if (client.connect(SERVER_IP, SERVER_PORT, 2000)) {
           logMessage("TCP connected");
+          if (!SendBuildInfo()) {
+            logMessage("BuildInfo send failed; reconnecting");
+            client.stop();
+          }
           lastSend = millis() - SEND_MS;
           dirty = true;
         } else logMessage("TCP connection failed");
