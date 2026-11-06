@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <Arduino_GFX_Library.h>
 #include <ArduinoJson.h>
+#include <esp_arduino_version.h>
 #include <math.h>
 #include "Secrets.h"
 
@@ -57,6 +58,31 @@ const char* tabNames[] = {"Room", "House", "News", "Settings"};
 void logMessage(const String& message) {
   unsigned long ms = millis();
   Serial.printf("[%lu.%03lu] %s\n", ms / 1000, ms % 1000, message.c_str());
+}
+
+/**
+ * @brief Emits a machine-readable, non-secret firmware build manifest for the repository capture script.
+ * @details One JSON object is printed between stable markers at startup; no device IDs or credentials are included.
+ */
+void LogBuildInfo() {
+  JsonDocument info;
+  info["schemaVersion"] = 1;
+  info["platform"] = "ESP32";
+  info["board"] = "Waveshare ESP32-S3-Touch-LCD-2";
+  info["arduinoCoreVersion"] = ESP_ARDUINO_VERSION_STR;
+  info["espIdfVersion"] = ESP.getSdkVersion();
+  info["chipModel"] = ESP.getChipModel();
+  info["chipRevision"] = ESP.getChipRevision();
+  info["cpuMHz"] = ESP.getCpuFreqMHz();
+  info["flashBytes"] = ESP.getFlashChipSize();
+  info["buildDate"] = __DATE__;
+  info["buildTime"] = __TIME__;
+  info["arduinoJsonVersion"] = String(ARDUINOJSON_VERSION_MAJOR) + "." +
+      String(ARDUINOJSON_VERSION_MINOR) + "." + String(ARDUINOJSON_VERSION_REVISION);
+  Serial.println("ARC_BUILD_INFO_BEGIN");
+  serializeJson(info, Serial);
+  Serial.println();
+  Serial.println("ARC_BUILD_INFO_END");
 }
 
 /**
@@ -439,6 +465,8 @@ void pollTouch(unsigned long now) {
  */
 void setup() {
   Serial.begin(115200);
+  delay(750); // Allow USB CDC serial monitor to attach after reset.
+  LogBuildInfo();
   preferences.begin("arcpanel", false);
   uint64_t mac = ESP.getEfuseMac();
   char id[32];
