@@ -3,12 +3,25 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ArcPanel.Server;
 
 const int port = 5000;
 const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
 var temperatureUnits = new ConcurrentDictionary<string, string>();
+using var buildInfoWriteLock = new SemaphoreSlim(1, 1);
+var buildInfoDirectory = Environment.GetEnvironmentVariable("ARC_BUILD_INFO_DIRECTORY");
+if (string.IsNullOrWhiteSpace(buildInfoDirectory))
+{
+    // During development, locate the repository docs directory from the running binary.
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "docs", "DeveloperGuide.md")))
+        directory = directory.Parent;
+    buildInfoDirectory = directory is null
+        ? Path.Combine(AppContext.BaseDirectory, "BuildInfo")
+        : Path.Combine(directory.FullName, "docs", "BuildInfo");
+}
 using var feeds = new InformationFeeds();
 using var ha = new HomeAssistantMonitor();
 using var shutdown = new CancellationTokenSource();
@@ -68,6 +81,8 @@ async Task HandleClientAsync(TcpClient client)
                     var deviceId = root.TryGetProperty("deviceId", out var id) ? id.GetString() : null;
                     if (string.IsNullOrWhiteSpace(deviceId)) throw new JsonException("Missing deviceId");
                     clients[deviceId] = DateTimeOffset.UtcNow;
+                    if (type == "build-info")
+                        await SaveBuildInfoAsync(deviceId, root);
                     if (root.TryGetProperty("temperatureUnits", out var units) && units.ValueKind == JsonValueKind.String)
                     {
                         string? requestedUnits = units.GetString();
@@ -142,4 +157,51 @@ async Task HandleClientAsync(TcpClient client)
         catch (Exception ex) { Log($"Client error {endpoint}: {ex}"); }
         finally { Log($"Disconnected: {endpoint}"); }
     }
+}
+
+ 
+/// <summary>Persists validated, non-secret ArcUnit build metadata when it changes.</summary>
+async Task SaveBuildInfoAsync(string deviceId, JsonElement root)
+{
+    if (deviceId.Length > 100 || deviceId.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch != '-'))
+        throw new JsonException("Invalid build-info deviceId");
+    if (!root.TryGetProperty("schemaVersion", out var schema) || schema.GetInt32() != 1 ||
+        !root.TryGetProperty("arduinoCoreVersion", out var core) || core.ValueKind != JsonValueKind.String)
+        throw new JsonException("Invalid build-info schema");
+    // Explicit allowlist prevents credentials or unrelated telemetry being written to disk.
+    var names = new[] { "schemaVersion", "deviceId", "roomId", "platform", "board",
+        "arduinoCoreVersion", "espIdfVersion", "chipModel", "chipRevision", "cpuMHz",
+        "flashBytes", "buildDate", "buildTime", "arduinoJsonVersion" };
+    var firmware = new JsonObject();
+    foreach (var name in names)
+        if (root.TryGetProperty(name, out var value))
+            firmware[name] = JsonNode.Parse(value.GetRawText());
+    var manifest = new JsonObject
+    {
+        ["firmware"] = firmware,
+        ["server"] = new JsonObject
+        {
+            ["runtimeVersion"] = Environment.Version.ToString(),
+            ["framework"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            ["os"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription
+        }
+    };
+    var json = manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+    await buildInfoWriteLock.WaitAsync(shutdown.Token);
+    try
+    {
+        Directory.CreateDirectory(buildInfoDirectory!);
+        var file = Path.Combine(buildInfoDirectory!, deviceId + ".json");
+        if (File.Exists(file) && await File.ReadAllTextAsync(file, shutdown.Token) == json)
+            return;
+        var temporary = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, json, shutdown.Token);
+            File.Move(temporary, file, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        Log($"BuildInfo updated: {file}");
+    }
+    finally { buildInfoWriteLock.Release(); }
 }
