@@ -13,3 +13,9 @@ Multiple clients are required from the outset. Each device has a persistent hard
 ## Safety
 
 Setpoint changes are requests, not direct heating commands. HA is authoritative for accepted setpoints. No local relay actuation is implemented.
+
+## Implementation Checkpoint (November 2026)
+
+The server polls Home Assistant over REST and supports GuestBedroom temperature, setpoint and read-only GuestFloor state; setpoint requests call the HA input-number service and verify the resulting helper value. Weather/news/market feeds are server-side best-effort services. SHT40 firmware reading, generalized server-managed room assignment, authenticated/encrypted transport, and HA WebSocket updates remain future work. The existing server TCP listener is restricted by deployment network policy, not application authentication.
+
+See [Developer Guide](DeveloperGuide.md), [User Guide](UserGuide.md), and [Protocol](Protocol.md).
