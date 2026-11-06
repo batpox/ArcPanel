@@ -15,6 +15,7 @@ using var shutdown = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 var listener = new TcpListener(IPAddress.Any, port);
 
+/// <summary>Writes a timestamped server diagnostic message.</summary>
 void Log(string message) =>
     Console.WriteLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}] {message}");
 
@@ -37,6 +38,7 @@ catch (OperationCanceledException) { }
 catch (Exception ex) { Log($"Server fatal: {ex}"); Environment.ExitCode = 1; }
 finally { listener.Stop(); Log("Server stopped."); }
 
+/// <summary>Processes a connected ArcUnit's newline-delimited JSON messages until disconnect.</summary>
 async Task HandleClientAsync(TcpClient client)
 {
     var endpoint = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
