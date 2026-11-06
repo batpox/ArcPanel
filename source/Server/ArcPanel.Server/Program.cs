@@ -49,6 +49,7 @@ async Task HandleClientAsync(TcpClient client)
             using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+
             while (!shutdown.IsCancellationRequested)
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
@@ -97,6 +98,7 @@ async Task HandleClientAsync(TcpClient client)
                     Log($"Invalid JSON from {endpoint}: {ex.Message}");
                     response = JsonSerializer.Serialize(new { type = "error", message = "Invalid message" });
                 }
+
                 await writer.WriteLineAsync(response);
                 Log($"TX {endpoint}: {response}");
                 if (response.Contains("heartbeat"))
