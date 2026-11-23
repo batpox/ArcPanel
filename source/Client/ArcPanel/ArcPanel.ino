@@ -11,6 +11,13 @@
 #include <Fonts/FreeSansBold12pt7b.h>
 #include "Secrets.h"
 
+#ifndef PANEL_ID
+#define PANEL_ID ROOM_ID
+#endif
+#ifndef SETPOINT_NAME
+#define SETPOINT_NAME "RoomSetpoint"
+#endif
+
 // Waveshare ESP32-S3-Touch-LCD-2: ST7789 240x320 and CST816D (0x15).
 // Arduino IDE: ESP32S3 Dev Module, USB CDC On Boot disabled (preserve working configuration).
 // Install "GFX Library for Arduino" using Library Manager.
@@ -29,7 +36,7 @@ Arduino_DataBus *bus = new Arduino_ESP32SPI(42, 45, 39, 38, 40);
 Arduino_GFX *gfx = new Arduino_ST7789(bus, GFX_NOT_DEFINED, 0, true, SCREEN_W, SCREEN_H);
 WiFiClient client;
 Preferences preferences;
-String deviceId, roomId, roomName, receiveBuffer;
+String deviceId, panelId, roomId, roomName, receiveBuffer;
 unsigned long lastSend = 0, lastRetry = 0, lastWifiRetry = 0;
 unsigned long lastAck = 0, lastDraw = 0, lastTouch = 0, setpointChangedAt = 0;
 float roomTemp = NAN, roomHumidity = NAN, setpoint = 70.0f;
@@ -41,6 +48,11 @@ static constexpr uint8_t BODY_SCALE = 2;
 static constexpr int TAB_HEIGHT = 66, TAB_BOTTOM = TAB_HEIGHT + 3; // 69px touch targets
 // Body text is 12px wide; tab labels use large 12x16px glyphs.
 bool pendingSetpoint = false, haveHaInfo = false;
+bool awaitingSetpointAck = false;
+String pendingCommandId;
+float pendingCommandValue = NAN;
+uint32_t commandSequence = 0;
+unsigned long lastCommandSentAt = 0;
 float haSetpoint = NAN;
 uint32_t heartbeatCount = 0;
 bool wasWifiConnected = false, screenReady = false, dirty = true;
@@ -76,6 +88,7 @@ bool SendBuildInfo() {
   info["type"] = "build-info";
   info["schemaVersion"] = 1;
   info["deviceId"] = deviceId;
+  info["panelId"] = panelId;
   info["roomId"] = roomId;
   info["platform"] = "ESP32";
   info["board"] = "Waveshare ESP32-S3-Touch-LCD-2";
@@ -406,6 +419,23 @@ void handleServerMessage(const String& line) {
   const char* type = doc["type"] | "";
   if (strcmp(type, "ack") == 0) {
     lastAck = millis();
+    const char* commandId = doc["commandId"] | "";
+    if (pendingCommandId.length() && pendingCommandId == commandId && doc["commandAccepted"].is<bool>()) {
+      awaitingSetpointAck = false;
+      if (doc["commandAccepted"].as<bool>()) {
+        if (!isnan(pendingCommandValue) && fabsf(setpoint - pendingCommandValue) < 0.01f) {
+          pendingSetpoint = false;
+          logMessage("Setpoint command accepted by server");
+        } else {
+          lastCommandSentAt = 0;
+          logMessage("Older setpoint command accepted; newer request remains pending");
+        }
+      } else {
+        lastCommandSentAt = millis();
+        logMessage(String("Setpoint command rejected: ") + (doc["commandResult"] | "unspecified error"));
+      }
+      refreshContent();
+    }
     if (selectedTab == 3) updateSettingsTelemetry();
     // Server echoes the accepted units; device preference remains authoritative.
   } else if (strcmp(type, "news") == 0) {
@@ -540,13 +570,14 @@ void setup() {
   char id[32];
   snprintf(id, sizeof(id), "ESP32-%012llX", (unsigned long long)mac);
   deviceId = id;
+  panelId = PANEL_ID;
   roomId = ROOM_ID;
   String savedUnits = preferences.getString("TemperatureUnits", "F");
   temperatureUnits = savedUnits == "C" ? 'C' : 'F';
   // A locally cached server-assigned display name may override the default.
   roomName = preferences.getString("room", roomId);
   if (roomName == "Unassigned" || roomName.isEmpty()) roomName = roomId;
-  logMessage("Device: " + deviceId + " | RoomId: " + roomId + " | RoomName: " + roomName);
+  logMessage("Device: " + deviceId + " | PanelId: " + panelId + " | RoomId: " + roomId + " | RoomName: " + roomName);
 
   pinMode(LCD_BL, OUTPUT);
   digitalWrite(LCD_BL, HIGH);
@@ -607,13 +638,12 @@ void loop() {
         JsonDocument hb;
         hb["type"] = "heartbeat";
         hb["deviceId"] = deviceId;
+        hb["panelId"] = panelId;
         hb["roomId"] = roomId;
         hb["uptimeMs"] = now;
         // Do not send fabricated room measurements before SHT40 is connected.
         if (!isnan(roomHumidity)) hb["roomHumidity"] = roomHumidity;
         hb["temperatureUnits"] = String(temperatureUnits);
-        bool sendSetpoint = pendingSetpoint && now - setpointChangedAt >= 3000;
-        if (sendSetpoint) hb["setpointF"] = setpoint;
         String payload;
         serializeJson(hb, payload);
         if (client.println(payload) == 0) {
@@ -622,9 +652,34 @@ void loop() {
           dirty = true;
         } else {
           ++heartbeatCount;
-          if (sendSetpoint) pendingSetpoint = false;
           logMessage("TX: " + payload);
           if (selectedTab == 3) updateSettingsTelemetry();
+        }
+        bool sendSetpointCommand = pendingSetpoint && now - setpointChangedAt >= 3000 &&
+          ((!awaitingSetpointAck && lastCommandSentAt == 0) || now - lastCommandSentAt >= 10000);
+        if (sendSetpointCommand && client.connected()) {
+          JsonDocument command;
+          pendingCommandId = deviceId + "-" + String(++commandSequence);
+          command["type"] = "command";
+          command["deviceId"] = deviceId;
+          command["panelId"] = panelId;
+          command["roomId"] = roomId;
+          command["commandId"] = pendingCommandId;
+          command["command"] = "ChangeSetpoint";
+          command["arguments"]["SetpointName"] = SETPOINT_NAME;
+          command["arguments"]["TempF"] = setpoint;
+          String commandPayload;
+          serializeJson(command, commandPayload);
+          if (client.println(commandPayload) == 0) {
+            logMessage("Setpoint command send failed");
+            client.stop();
+            dirty = true;
+          } else {
+            awaitingSetpointAck = true;
+            pendingCommandValue = setpoint;
+            lastCommandSentAt = now;
+            logMessage("TX: " + commandPayload);
+          }
         }
       }
       while (client.available()) {
@@ -656,3 +711,4 @@ void loop() {
   if (screenReady && selectedTab == 3 && now - lastDraw >= 1000) { updateSettingsTelemetry(); lastDraw = now; }
   delay(10);
 }
+

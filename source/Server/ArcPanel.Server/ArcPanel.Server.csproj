@@ -5,4 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <None Update="ArcPanelConfig.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
+

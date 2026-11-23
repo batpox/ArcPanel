@@ -4,8 +4,8 @@ using System.Text.Json;
 
 namespace ArcPanel.Server;
 
-// Read-only Home Assistant REST monitor. Never send credentials to ArcUnits.
-/// <summary>Polls Home Assistant and forwards validated sensor values and setpoint requests.</summary>
+// Home Assistant credentials stay on the server; relay entities are only polled, never controlled.
+/// <summary>Polls Home Assistant and sends configured setpoint updates.</summary>
 internal sealed class HomeAssistantMonitor : IDisposable
 {
     /// <summary>Represents the most recent Home Assistant status and sensor readings.</summary>
@@ -115,20 +115,30 @@ internal sealed class HomeAssistantMonitor : IDisposable
         };
     }
 
-    /// <summary>Requests a GuestBedroom setpoint change through Home Assistant and verifies the accepted value.</summary>
-    public async Task<bool> SetGuestBedroomSetpointAsync(double value, CancellationToken cancellation)
+    /// <summary>Requests a configured input-number setpoint change through Home Assistant and verifies the accepted value.</summary>
+    public async Task<bool> SetSetpointAsync(string entityId, double value, double minimum, double maximum,
+        CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token) ||
-            !double.IsFinite(value) || value < 50 || value > 85) return false;
-        using var response = await http.PostAsJsonAsync(baseUrl + "/api/services/input_number/set_value",
-            new { entity_id = GuestSetpointEntity, value }, cancellation);
-        if (!response.IsSuccessStatusCode) return false;
-        // HA owns the value. Refresh from HA instead of claiming an unconfirmed write.
-        var actual = await ReadNumberAsync(GuestSetpointEntity, cancellation);
-        lock (gate) snapshot = snapshot with { GuestBedroomSetpointF = actual };
-        return actual.HasValue && Math.Abs(actual.Value - value) < 0.51;
+            !entityId.StartsWith("input_number.", StringComparison.Ordinal) ||
+            !double.IsFinite(value) || value < minimum || value > maximum) return false;
+        try
+        {
+            using var response = await http.PostAsJsonAsync(baseUrl + "/api/services/input_number/set_value",
+                new { entity_id = entityId, value }, cancellation);
+            if (!response.IsSuccessStatusCode) return false;
+            // HA owns the value. Refresh from HA instead of claiming an unconfirmed write.
+            var actual = await ReadNumberAsync(entityId, cancellation);
+            if (entityId == GuestSetpointEntity)
+                lock (gate) snapshot = snapshot with { GuestBedroomSetpointF = actual };
+            return actual.HasValue && Math.Abs(actual.Value - value) < 0.51;
+        }
+        catch (HttpRequestException) { return false; }
+        catch (JsonException) { return false; }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return false; }
     }
 
     /// <summary>Releases owned HTTP resources.</summary>
     public void Dispose() => http.Dispose();
 }
+

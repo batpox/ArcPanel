@@ -2,7 +2,7 @@
 
 **Area Resource Control** — networked ESP32-S3 touchscreen room panels and a C#/.NET coordination server.
 
-- **Windows 11 server:** .NET 10, TCP/JSON, multi-client device registry; future integration with Linux Home Assistant.
+- **Windows 11 server:** .NET 10, TCP/JSON, multi-client device registry, configurable Home Assistant setpoint routing.
 - **ESP32-S3 panels:** Arduino C++, local SHT40 temperature/humidity, room identity, touchscreen setpoints.
 - **Home Assistant:** sole authority for radiant heating actuation and energy-train logic.
 
@@ -27,12 +27,12 @@ docs/
 
 ## Getting started
 
-1. Open `source/Server/ArcPanel.Server.slnx` in Visual Studio 2026 and run the .NET 10 console server.
-2. Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, then enter Wi-Fi credentials, the server's Ethernet IPv4 address, and a unique ROOM_ID such as MasterBedroom.
+1. Open `source/Server/ArcPanel.Server.slnx` in Visual Studio 2026 and run the .NET 10 console server. Edit `ArcPanelConfig.json` for the panel and HA helper mappings.
+2. Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, then enter Wi-Fi credentials, the server's Ethernet IPv4 address, and the panel's `ROOM_ID`, `PANEL_ID`, and `SETPOINT_NAME`.
 3. Install **GFX Library for Arduino** and **ArduinoJson 7** from Arduino IDE Library Manager. Open `ArcPanel.ino`, select **ESP32S3 Dev Module**, enable **USB CDC On Boot**, upload and monitor at **115200 baud**.
 4. The server listens on TCP port **5000**. Allow private-LAN inbound access in Windows Firewall.
 
-The ESP32 display has four touch-selectable tabs in one row: ARC Room, ARC House, News, and Settings. Settings heartbeat counters update without full-screen redraw. ARC Room shows simulated temperature/humidity and a touch-adjustable circular setpoint. The setpoint is sent once in a heartbeat after 3 seconds without adjustment. News shows server-sent outside conditions and four short news lines; the server currently sends sample weather and placeholder headlines, not live feeds. ARC House displays a placeholder and the HA-Info setpoint. Settings displays the local RoomId, locally cached RoomName, heartbeat count and latest server acknowledgement. The other tabs are placeholders. The 240x320 display uses ST7789 (Arduino_GFX) and CST816D (I2C); these pins are specific to Waveshare ESP32-S3-Touch-LCD-2. The server currently acknowledges heartbeats but does not yet assign a RoomName. This is not yet a finished environmental controller; SHT40, Home Assistant integration, server-managed configuration and authentication are future increments. Do not commit `Secrets.h`.
+The ESP32 display has four touch-selectable tabs in one row: ARC Room, ARC House, News, and Settings. The Room tab allows setpoint adjustment. After a 3-second idle delay, the panel sends a `ChangeSetpoint` command with its logical panel ID, setpoint name, and Fahrenheit value. The server maps the request through `ArcPanelConfig.json` and calls only Home Assistant's `input_number.set_value`; it does not issue relay commands. Settings shows the panel and room IDs, heartbeat count, and latest acknowledgement. The 240x320 display uses ST7789 (Arduino_GFX) and CST816D (I2C); these pins are specific to Waveshare ESP32-S3-Touch-LCD-2. Do not commit `Secrets.h`.
 
 See [development instructions](docs/Development.md), [architecture](docs/Architecture.md), and [protocol](docs/Protocol.md).
 
@@ -85,8 +85,8 @@ within the 60-pixel columns without an additional font library.
 The Room screen uses two side-by-side panels rather than concentric rings:
 actual measured room temperature and humidity on the left, and the desired
 setpoint on the right. Large up/down chevrons adjust the target in 0.5°F
-increments (50–85°F). The existing 3-second idle debounce and heartbeat
-setpoint reporting are unchanged. Until the SHT40 is wired into the firmware,
+increments (50–85°F). After 3 seconds without adjustment, the firmware sends
+a separate command instead of adding the target to heartbeat telemetry. Until the SHT40 is wired into the firmware,
 the actual room readings remain simulated.
 
 ### Temperature units and information tickers
@@ -103,9 +103,8 @@ maximum precipitation probability, using the selected temperature units.
 The House tab scrolls **Home Assistant connection status and alerts**.
 Scrolling happens locally, without a separate network message per frame.
 
-**Important:** HA API connectivity has not been implemented yet. Until it
-is, the House ticker correctly shows `HA: Not connected | Alerts: Unavailable`,
-not simulated HA data. The SHT40 sensor integration also remains pending.
+The server reports unavailable values when HA cannot be reached or an entity
+is not configured. The SHT40 sensor integration remains pending.
 
 ### Large color tickers and Home Assistant monitor
 
@@ -116,7 +115,7 @@ a **cyan Home Assistant ticker** shows version, connection status,
 living-room temperature, kitchen temperature, and any configured alert.
 All three scroll locally on the ArcUnit; tickers need not be at the bottom.
 
-The server now has a **read-only Home Assistant REST monitor** that polls
+The server has a Home Assistant REST monitor that polls
 every 30 seconds. Configure environment variables on the **C# server**
 before starting it:
 
@@ -135,15 +134,15 @@ Unknown/unconfigured sensors display `--`, not fabricated readings.
 If HA credentials are missing, the status is `Not configured`; connection
 failures show `Offline`. The access token is never sent to an ArcUnit.
 
-This is a first read-only REST connection, **not yet the full HA WebSocket
-subscription and action integration**. ARC setpoints still are not wired
-to HA heating controls.
+The server uses REST both to monitor HA and to call the input-number setpoint
+action. It does not call any relay or switch control action.
 
 
 ### GuestBedroom live Room tab (Home Assistant)
 
-Set `ROOM_ID "GuestBedroom"` in the panel's local `Secrets.h` (copy from
-`Secrets.example.h` if necessary). Set `ARC_HA_URL` and `ARC_HA_TOKEN`
+Set `ROOM_ID "GuestBedroom"`, `PANEL_ID "GuestBed"`, and
+`SETPOINT_NAME "GuestBedroomSetpoint"` in the panel's local `Secrets.h`.
+Set `ARC_HA_URL` and `ARC_HA_TOKEN`
 on the Windows server before launching it. For this installation the expected
 HA entities are:
 
@@ -158,12 +157,17 @@ state. Unavailable temperature and relay states display `--`; fake temperature
 and humidity telemetry is no longer sent. Humidity remains unavailable until
 a real HA humidity source or SHT40 integration is configured.
 
-GuestBedroom setpoint changes from the panel call HA's
-`input_number.set_value` service; no switch-control service is used.
-HA remains the heating authority. ARC confirms the HA setpoint by rereading it,
-and a later HA poll synchronizes the panel. **This first integration uses
+GuestBedroom setpoint changes travel as a `ChangeSetpoint` command. The server
+maps `PANEL_ID` and `SETPOINT_NAME` through `ArcPanelConfig.json`, checks
+`TempF` against the configured range, then calls HA's `input_number.set_value`
+action. It does not call a switch-control action. HA remains the heating
+authority. ARC confirms the update by rereading the helper, and a later HA poll
+synchronizes the panel. **This integration uses
 30-second REST polling, not WebSocket updates**. Ensure the HA entity IDs
 above actually exist; renaming a helper does not necessarily rename its ID.
 
-Security: the HA long-lived token currently has broader privileges than
-setpoint-only access. Keep the token on the server, not on the panel.
+The sample mapping is in `source/Server/ArcPanel.Server/ArcPanelConfig.json`.
+Override its path with `ARC_CONFIG_PATH`. Server exchanges and diagnostics are
+appended to daily files under `logs/`; override that folder with
+`ARC_LOG_DIRECTORY`. Keep `ARC_HA_TOKEN` on the server, not on a panel.
+

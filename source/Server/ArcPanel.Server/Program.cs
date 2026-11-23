@@ -11,6 +11,14 @@ const int maxLineLength = 4096;
 var clients = new ConcurrentDictionary<string, DateTimeOffset>();
 var temperatureUnits = new ConcurrentDictionary<string, string>();
 using var buildInfoWriteLock = new SemaphoreSlim(1, 1);
+var logGate = new object();
+var logDirectory = Environment.GetEnvironmentVariable("ARC_LOG_DIRECTORY");
+if (string.IsNullOrWhiteSpace(logDirectory))
+    logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+var configPath = Environment.GetEnvironmentVariable("ARC_CONFIG_PATH");
+if (string.IsNullOrWhiteSpace(configPath))
+    configPath = Path.Combine(AppContext.BaseDirectory, "ArcPanelConfig.json");
+using var configuration = JsonDocument.Parse(File.ReadAllText(configPath));
 var buildInfoDirectory = Environment.GetEnvironmentVariable("ARC_BUILD_INFO_DIRECTORY");
 if (string.IsNullOrWhiteSpace(buildInfoDirectory))
 {
@@ -29,8 +37,41 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; shutdown.Cancel(); };
 var listener = new TcpListener(IPAddress.Any, port);
 
 /// <summary>Writes a timestamped server diagnostic message.</summary>
-void Log(string message) =>
-    Console.WriteLine($"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}] {message}");
+void Log(string message)
+{
+    var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}] {message}";
+    Console.WriteLine(line);
+    try
+    {
+        lock (logGate)
+        {
+            Directory.CreateDirectory(logDirectory);
+            File.AppendAllText(Path.Combine(logDirectory, $"ArcPanel-{DateTime.Now:yyyy-MM-dd}.log"), line + Environment.NewLine);
+        }
+    }
+    catch (Exception ex) { Console.Error.WriteLine($"Could not write ArcPanel log: {ex.Message}"); }
+}
+
+bool TryGetSetpointMapping(string? panelId, string? setpointName,
+    out string entityId, out string argumentName, out double minimum, out double maximum)
+{
+    entityId = argumentName = string.Empty;
+    minimum = maximum = 0;
+    if (string.IsNullOrWhiteSpace(panelId) || string.IsNullOrWhiteSpace(setpointName) ||
+        !configuration.RootElement.TryGetProperty("Panels", out var panels) ||
+        !panels.TryGetProperty(panelId, out var panel) ||
+        !panel.TryGetProperty("Setpoints", out var setpoints) ||
+        !setpoints.TryGetProperty(setpointName, out var mapping)) return false;
+    if (!mapping.TryGetProperty("EntityId", out var entity) || entity.ValueKind != JsonValueKind.String ||
+        !mapping.TryGetProperty("ArgumentName", out var argument) || argument.ValueKind != JsonValueKind.String ||
+        !mapping.TryGetProperty("Minimum", out var min) || !min.TryGetDouble(out minimum) ||
+        !mapping.TryGetProperty("Maximum", out var max) || !max.TryGetDouble(out maximum)) return false;
+    entityId = entity.GetString() ?? string.Empty;
+    argumentName = argument.GetString() ?? string.Empty;
+    return entityId.StartsWith("input_number.", StringComparison.Ordinal) &&
+           !string.IsNullOrWhiteSpace(argumentName) && double.IsFinite(minimum) &&
+           double.IsFinite(maximum) && minimum <= maximum;
+}
 
 try
 {
@@ -94,15 +135,32 @@ async Task HandleClientAsync(TcpClient client)
                         }
                     }
                     var roomId = root.TryGetProperty("roomId", out var rid) ? rid.GetString() : null;
-                    if (root.TryGetProperty("setpointF", out var sp) && sp.ValueKind == JsonValueKind.Number &&
-                        sp.TryGetDouble(out var requested) && requested >= 50 && requested <= 85)
+                    var panelId = root.TryGetProperty("panelId", out var panelElement) ? panelElement.GetString() : null;
+                    string? commandId = null;
+                    bool? commandAccepted = null;
+                    string? commandResult = null;
+                    if (type == "command")
                     {
-                        if (roomId == "GuestBedroom")
+                        commandId = root.TryGetProperty("commandId", out var commandIdElement) ? commandIdElement.GetString() : null;
+                        var command = root.TryGetProperty("command", out var commandElement) ? commandElement.GetString() : null;
+                        if (command == "ChangeSetpoint" && root.TryGetProperty("arguments", out var args) &&
+                            args.ValueKind == JsonValueKind.Object &&
+                            args.TryGetProperty("SetpointName", out var nameElement) && nameElement.ValueKind == JsonValueKind.String)
                         {
-                            bool accepted = await ha.SetGuestBedroomSetpointAsync(requested, shutdown.Token);
-                            Log($"GuestBedroom setpoint request from {deviceId}: {requested:F1} F, accepted={accepted}");
+                            string setpointName = nameElement.GetString() ?? string.Empty;
+                            if (TryGetSetpointMapping(panelId, setpointName, out var entityId, out var argumentName, out var minimum, out var maximum) &&
+                                args.TryGetProperty(argumentName, out var valueElement) && valueElement.ValueKind == JsonValueKind.Number &&
+                                valueElement.TryGetDouble(out var requested) && double.IsFinite(requested) &&
+                                requested >= minimum && requested <= maximum)
+                            {
+                                commandAccepted = await ha.SetSetpointAsync(entityId, requested, minimum, maximum, shutdown.Token);
+                                commandResult = commandAccepted.Value ? $"Set {entityId} to {requested:F1}" : $"Home Assistant rejected update for {entityId}";
+                            }
+                            else commandResult = $"No valid setpoint mapping/value for panel '{panelId}', setpoint '{setpointName}'";
                         }
-                        else Log($"Ignored setpoint request from unmapped room {roomId ?? "(null)"}");
+                        else commandResult = $"Unsupported or malformed command '{command ?? "(null)"}'";
+                        commandAccepted ??= false;
+                        Log($"Command {commandId ?? "(no id)"} from device={deviceId} panel={panelId ?? "(null)"}: {command ?? "(null)"}, accepted={commandAccepted}, result={commandResult}");
                     }
                     if (root.TryGetProperty("roomTempF", out var rt) && root.TryGetProperty("roomHumidity", out var rh))
                         Log($"Room telemetry {roomId}: {rt} F, {rh}% humidity");
@@ -110,7 +168,9 @@ async Task HandleClientAsync(TcpClient client)
                         type = "ack", deviceId, requestType = type,
                         serverTime = DateTimeOffset.UtcNow.ToString("O"),
                         roomId, roomName = roomId ?? "Unassigned",
-                        temperatureUnits = temperatureUnits.GetOrAdd(deviceId, "F")
+                        panelId,
+                        temperatureUnits = temperatureUnits.GetOrAdd(deviceId, "F"),
+                        commandId, commandAccepted, commandResult
                     });
                 }
                 catch (JsonException ex)
@@ -169,7 +229,7 @@ async Task SaveBuildInfoAsync(string deviceId, JsonElement root)
         !root.TryGetProperty("arduinoCoreVersion", out var core) || core.ValueKind != JsonValueKind.String)
         throw new JsonException("Invalid build-info schema");
     // Explicit allowlist prevents credentials or unrelated telemetry being written to disk.
-    var names = new[] { "schemaVersion", "deviceId", "roomId", "platform", "board",
+    var names = new[] { "schemaVersion", "deviceId", "panelId", "roomId", "platform", "board",
         "arduinoCoreVersion", "espIdfVersion", "chipModel", "chipRevision", "cpuMHz",
         "flashBytes", "buildDate", "buildTime", "arduinoJsonVersion" };
     var firmware = new JsonObject();
@@ -205,3 +265,4 @@ async Task SaveBuildInfoAsync(string deviceId, JsonElement root)
     }
     finally { buildInfoWriteLock.Release(); }
 }
+
