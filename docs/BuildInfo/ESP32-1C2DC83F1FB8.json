@@ -12,12 +12,12 @@
     "cpuMHz": 240,
     "flashBytes": 16777216,
     "buildDate": "Nov  6 2026",
-    "buildTime": "10:56:02",
+    "buildTime": "11:35:50",
     "arduinoJsonVersion": "7.4.3"
   },
   "server": {
-    "runtimeVersion": "10.0.14",
-    "framework": ".NET 10.0.14",
+    "runtimeVersion": "10.0.15",
+    "framework": ".NET 10.0.15",
     "os": "Microsoft Windows 10.0.26200"
   }
 }
