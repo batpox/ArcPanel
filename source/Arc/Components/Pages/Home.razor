@@ -116,14 +116,29 @@ else if (activeTab == "diagnostics")
     private PeriodicTimer? timer;
     private CancellationTokenSource? refreshCancellation;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         Navigation.LocationChanged += HandleLocationChanged;
         SetTabFromUri(Navigation.Uri);
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            refreshCancellation = new CancellationTokenSource();
+            timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+            _ = InitializeMonitoringAsync(refreshCancellation.Token);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task InitializeMonitoringAsync(CancellationToken token)
+    {
         await RefreshAsync();
-        refreshCancellation = new CancellationTokenSource();
-        timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
-        _ = AutoRefreshAsync(refreshCancellation.Token);
+        if (!token.IsCancellationRequested)
+            await InvokeAsync(StateHasChanged);
+        await AutoRefreshAsync(token);
     }
     private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
     {
