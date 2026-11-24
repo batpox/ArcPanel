@@ -2,6 +2,7 @@
   "firmware": {
     "schemaVersion": 1,
     "deviceId": "ESP32-1C2DC83F1FB8",
+    "panelId": "MasterBedroom",
     "roomId": "MasterBedroom",
     "platform": "ESP32",
     "board": "Waveshare ESP32-S3-Touch-LCD-2",
@@ -11,8 +12,8 @@
     "chipRevision": 2,
     "cpuMHz": 240,
     "flashBytes": 16777216,
-    "buildDate": "Nov  6 2026",
-    "buildTime": "11:35:50",
+    "buildDate": "Nov 23 2026",
+    "buildTime": "08:20:31",
     "arduinoJsonVersion": "7.4.3"
   },
   "server": {
