@@ -1,25 +1,30 @@
-# ARC wire protocol — iteration 1
+# ArcServer wire protocol — assignment iteration
 
 TCP port 5000, newline-delimited UTF-8 JSON; one JSON object per line.
-Trusted LAN only; no authentication or encryption yet.
+The panel's MAC-derived `deviceId` identifies the physical unit. `panelId` is
+the current logical Arc ID and is only a cached client hint; ArcServer resolves
+the authoritative assignment from SQLite. The trusted LAN protocol has no
+device authentication or encryption yet.
 
 Every 2 seconds, the ArcUnit sends a heartbeat:
 ```json
-{"type":"heartbeat","deviceId":"ESP32-001122334455","panelId":"GuestBed","roomId":"GuestBedroom","uptimeMs":12345,"roomHumidity":46,"temperatureUnits":"F"}
+{"type":"heartbeat","deviceId":"ESP32-001122334455","panelId":"GuestBedroom-1","roomId":"GuestBedroom","uptimeMs":12345,"roomHumidity":46,"temperatureUnits":"F"}
 ```
-`deviceId` identifies the hardware. `panelId` is the logical panel name used
-by the server configuration; `roomId` remains the room shown in the UI.
+The `panelId` and `roomId` fields are hints from the panel; the server does not
+trust them to route commands. The database assignment supplies Arc ID, room,
+display name and setpoint metadata.
 Fake room temperature/humidity are explicitly demonstration data until SHT40 is wired.
 
 After a user changes the setpoint and leaves it untouched for 3 seconds, the
 ArcUnit sends a separate command:
 ```json
-{"type":"command","deviceId":"ESP32-001122334455","panelId":"GuestBed","roomId":"GuestBedroom","commandId":"ESP32-001122334455-1","command":"ChangeSetpoint","arguments":{"SetpointName":"GuestBedroomSetpoint","TempF":68}}
+{"type":"command","deviceId":"ESP32-001122334455","panelId":"GuestBedroom-1","roomId":"GuestBedroom","commandId":"ESP32-001122334455-1","command":"ChangeSetpoint","arguments":{"SetpointName":"GuestBedroomSetpoint","TempF":68}}
 ```
-The server uses `panelId` and `arguments.SetpointName` to look up the Home
-Assistant input-number entity in `ArcPanelConfig.json`. The configuration also
-names the value argument and minimum/maximum accepted temperatures. The server
-calls only `input_number.set_value`; it does not command a relay. The response
+The server resolves the assigned Arc ID and stored `SetpointName`, then looks
+up the Home Assistant input-number entity in `ArcPanelConfig.json`. Only an
+operational `-1` Arc ID may issue setpoint commands. The configuration names
+the value argument and minimum/maximum accepted temperatures. The server calls
+only `input_number.set_value`; it does not command a relay. The response
 is an `ack` containing the `commandId`, `commandAccepted`, and `commandResult`.
 An unacknowledged or rejected command remains pending on the panel and is retried.
 
@@ -27,7 +32,7 @@ Example configuration:
 ```json
 {
   "Panels": {
-    "GuestBed": {
+    "GuestBedroom-1": {
       "Setpoints": {
         "GuestBedroomSetpoint": {
           "EntityId": "input_number.guest_bedroom_temperature_setpoint",
@@ -40,9 +45,38 @@ Example configuration:
   }
 }
 ```
-Copy and edit the server's `ArcPanelConfig.json` for the installation. Set
-`ARC_CONFIG_PATH` to use a different file. Set `PANEL_ID` and `SETPOINT_NAME`
-in each panel's local `Secrets.h` to match the mapping.
+Copy and edit ArcServer's `ArcPanelConfig.json` for the installation. Its
+panel keys are Arc IDs such as `GuestBedroom-1`. Set `ARC_CONFIG_PATH` to use a
+different file. Panels no longer contain room or panel IDs in `Secrets.h`.
+
+## First connection and ID selection
+
+The panel sends a `build-info` message and then heartbeats using its persistent
+MAC-derived `deviceId`. ArcServer creates or updates an `ArcDevices` row for
+that hardware. If the device has no Arc ID, the server sends a page of
+currently available enabled IDs (three per page):
+
+```json
+{"type":"assignment-options","deviceId":"ESP32-001122334455","arcIds":[{"arcId":"GuestBedroom-1","roomId":"GuestBedroom","roomName":"Guest Bedroom","operational":true},{"arcId":"GuestBedroom-2","roomId":"GuestBedroom","roomName":"Guest Bedroom (Test)","operational":false}]}
+```
+
+After a user taps one, the panel sends:
+
+```json
+{"type":"claim-arc-id","deviceId":"ESP32-001122334455","arcId":"GuestBedroom-1"}
+```
+
+To request another page, the panel sends `{"type":"list-arc-ids","deviceId":"ESP32-001122334455","page":1}`. ArcServer atomically assigns only an available ID and acknowledges with
+`assignmentAccepted`, `arcId`, `roomId`, `roomName`, and `setpointName`. A
+failed claim is rejected and the panel receives the free list again on its
+next heartbeat. Arc's management UI can also transfer an ID to a different
+discovered physical device; a transfer clears the previous assignment.
+
+ArcServer exposes a loopback-only HTTP management API on port 5081 by default:
+`GET/POST /api/arc-ids`, `PUT/DELETE /api/arc-ids/{arcId}`,
+`GET /api/devices`, `GET /api/status`, `POST /api/assignments`, and
+`DELETE /api/assignments/{deviceIdentity}`. Arc calls this API server-side;
+the browser uses Arc's HTTP port 5080.
 
 Server sends three newline-delimited JSON messages per heartbeat (the command
 gets its own acknowledgement):
@@ -54,7 +88,7 @@ gets its own acknowledgement):
 The server now attempts real Open-Meteo current/forecast data, NWS active weather alerts, BBC World/US RSS headlines and Stooq Dow/Nasdaq index quotes. Values above are illustrative, not actual observations or quotes. Unavailable values remain absent or marked unavailable; the server caches the last successful values. Set `ARC_LATITUDE`, `ARC_LONGITUDE` and `ARC_LOCATION_NAME` on the server to customize its location (defaults to approximate Franklin, PA). Refresh interval: 15 minutes. Quotes may be delayed, and Stooq availability varies.
 Client serial logs use uptime seconds.milliseconds. The server writes its
 timestamped diagnostics, received messages, sent messages, and command outcomes
-to daily `logs/ArcPanel-YYYY-MM-DD.log` files. `ARC_LOG_DIRECTORY` overrides
+to daily `logs/ArcServer-YYYY-MM-DD.log` files. `ARC_LOG_DIRECTORY` overrides
 the log directory. The HA access token remains on the server.
 
 ## Client preferences and tickers

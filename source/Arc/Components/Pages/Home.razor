@@ -1,0 +1,188 @@
+@page "/"
+@inject ArcApiClient Api
+@inject ArcAdminAccess AdminAccess
+@inject ArcSession Session
+@inject NavigationManager Navigation
+@implements IDisposable
+<PageTitle>Arc | Home</PageTitle>
+@if (!Session.IsAuthenticated)
+{
+    <section class="login-card">
+        <div class="brand-mark login-mark">A</div>
+        <div class="eyebrow">ARC MANAGEMENT</div>
+        <h1>Enter management PIN</h1>
+        <p>Use the temporary PIN printed by Arc at startup, or the value configured in <code>ARC_ADMIN_PIN</code>.</p>
+        <input type="password" @bind="enteredPin" @bind:event="oninput" autocomplete="current-password" inputmode="numeric" maxlength="32" />
+        @if (!string.IsNullOrEmpty(loginError)) { <div class="notice error">@loginError</div> }
+        <button class="button primary" @onclick="Login">Continue to Arc</button>
+    </section>
+}
+else
+{
+<div class="page-head">
+    <div><div class="eyebrow">HOME AUTOMATION</div><h1>Arc Control</h1><p class="subhead">Monitor ArcServer and manage panel identities and room assignments.</p></div>
+    <div class="head-actions"><button class="button quiet" @onclick="RefreshAsync">↻ &nbsp; Refresh</button><button class="button quiet" @onclick="LockArc">Lock</button><span class="updated">@updatedText</span></div>
+</div>
+<div class="tabbar" role="tablist">
+    @foreach (var tab in tabs)
+    {
+        <button class="workspace-tab @(activeTab == tab.Key ? "active" : "")" @onclick="() => SelectTab(tab.Key)">@tab.Label</button>
+    }
+</div>
+@if (!string.IsNullOrWhiteSpace(errorMessage)) { <div class="notice error">@errorMessage</div> }
+@if (!string.IsNullOrWhiteSpace(successMessage)) { <div class="notice success">@successMessage</div> }
+<div class="tab-content">
+@if (activeTab == "overview")
+{
+    <section class="overview-grid">
+        <article class="metric-card"><span>CONFIGURED ARC IDs</span><strong>@arcIds.Count</strong><small>@arcIds.Count(x => x.DeviceIdentity is not null) assigned · @arcIds.Count(x => x.DeviceIdentity is null) available</small></article>
+        <article class="metric-card"><span>DISCOVERED DEVICES</span><strong>@devices.Count</strong><small>@devices.Count(x => x.ArcId is not null) assigned to a logical Arc ID</small></article>
+        <article class="metric-card"><span>CONNECTED NOW</span><strong>@(serverStatus?.ConnectedDevices ?? 0)</strong><small>Active panel TCP sessions</small></article>
+    </section>
+    <section class="section-card">
+        <div class="section-heading"><div><h2>Home Assistant</h2><p>Current monitor snapshot; ARC does not actuate relays.</p></div><span class="state @HaStateClass">@(serverStatus?.HomeAssistantStatus ?? "Unavailable")</span></div>
+        <div class="diagnostic-grid"><div><span>VERSION</span><strong>@(serverStatus?.HomeAssistantVersion ?? "—")</strong></div><div><span>GUEST BEDROOM</span><strong>@Temp(serverStatus?.GuestBedroomTempF) °F &nbsp;·&nbsp; target @Temp(serverStatus?.GuestBedroomSetpointF) °F</strong></div><div><span>GUEST FLOOR RELAY</span><strong>@(serverStatus?.GuestFloorOn is bool state ? state ? "ON · read-only" : "OFF · read-only" : "Unavailable")</strong></div><div><span>INFORMATION FEEDS</span><strong>@(serverStatus?.InformationLocation ?? "Unavailable")</strong></div></div>
+        @if (serverStatus is not null && serverStatus.Alerts.Length > 0) { <div class="alert-list">@foreach (var alert in serverStatus.Alerts) { <div>⚠ &nbsp; @alert</div> }</div> }
+    </section>
+    <section class="section-card">
+        <div class="section-heading"><div><h2>Panel assignments</h2><p>Arc IDs are reusable; device identities follow the physical ESP32.</p></div><button class="button primary" @onclick="ShowArcIds">Manage Arc IDs</button></div>
+        @if (arcIds.Count == 0) { <div class="empty">No Arc IDs are configured yet.</div> }
+        else
+        {
+            <div class="table-wrap"><table><thead><tr><th>ARC ID</th><th>ROOM</th><th>DEVICE IDENTITY</th><th>LAST SEEN</th><th>STATUS</th></tr></thead><tbody>
+            @foreach (var item in arcIds)
+            {
+                <tr><td><button class="text-button" @onclick="() => InspectArcId(item)">@item.ArcId</button>@if (item.IsOperational) { <span class="badge primary-badge">Operational</span> }</td><td>@item.RoomName</td><td class="mono">@(item.DeviceIdentity ?? "Available")</td><td>@Seen(item.LastSeenUtc)</td><td><span class="state @(item.DeviceIdentity is null ? "state-free" : IsOnline(item.LastSeenUtc) ? "state-online" : "state-offline")">@(item.DeviceIdentity is null ? "Unassigned" : IsOnline(item.LastSeenUtc) ? "Online" : "Offline")</span></td></tr>
+            }
+            </tbody></table></div>
+        }
+    </section>
+    <section class="section-card compact-card"><div class="section-heading"><div><h2>Unassigned devices</h2><p>New panels appear after connecting to ArcServer over Wi-Fi.</p></div><button class="text-button" @onclick="ShowDevices">View devices →</button></div>
+        @if (!devices.Any(x => x.ArcId is null)) { <div class="empty small-empty">No unassigned devices.</div> }
+        else { <div class="device-pills">@foreach (var device in devices.Where(x => x.ArcId is null)) { <span class="device-pill mono">@device.DeviceIdentity</span> }</div> }
+    </section>
+}
+else if (activeTab == "arcids")
+{
+    <section class="section-card">
+        <div class="section-heading"><div><h2>Arc ID registry</h2><p>Each ID represents a role and instance number. The <code>-1</code> instance is marked operational.</p></div><button class="button primary" @onclick="NewArcId">＋ &nbsp; New Arc ID</button></div>
+        @if (editing)
+        {
+            <div class="edit-card"><div class="edit-title">@(editingId is null ? "Create Arc ID" : "Edit Arc ID")</div><div class="form-grid">
+                <label>Arc ID<input @bind="formArcId" placeholder="GuestBedroom-3" disabled="@(editingId is not null)" /></label>
+                <label>Room ID<input @bind="formRoomId" placeholder="GuestBedroom" /></label>
+                <label>Display name<input @bind="formRoomName" placeholder="Guest Bedroom" /></label>
+                <label>Setpoint name<input @bind="formSetpoint" placeholder="GuestBedroomSetpoint" /></label>
+            </div><label class="check-label"><input type="checkbox" @bind="formEnabled" /> Available to panels</label><div class="form-actions"><button class="button primary" @onclick="SaveArcIdAsync">Save</button><button class="button quiet" @onclick="CancelEdit">Cancel</button></div></div>
+        }
+        <div class="table-wrap"><table><thead><tr><th>ARC ID</th><th>ROOM</th><th>SETPOINT</th><th>ASSIGNED DEVICE</th><th>AVAILABLE</th><th></th></tr></thead><tbody>
+        @foreach (var item in arcIds)
+        {
+            <tr><td><button class="text-button" @onclick="() => InspectArcId(item)">@item.ArcId</button>@if (item.IsOperational) { <span class="badge primary-badge">-1 · Operational</span> }</td><td>@item.RoomName <span class="muted-inline">(@item.RoomId)</span></td><td class="mono">@item.SetpointName</td><td class="mono">@(item.DeviceIdentity ?? "—")</td><td><span class="state @(item.Enabled ? "state-online" : "state-offline")">@(item.Enabled ? "Yes" : "No")</span></td><td class="row-actions"><button title="Edit" class="icon-button" @onclick="() => EditArcId(item)">✎</button><button title="Delete unassigned Arc ID" class="icon-button danger-icon" disabled="@(item.DeviceIdentity is not null)" @onclick="() => DeleteArcIdAsync(item.ArcId)">×</button></td></tr>
+        }
+        </tbody></table></div>
+    </section>
+}
+else if (activeTab == "devices")
+{
+    <section class="section-card">
+        <div class="section-heading"><div><h2>Physical devices</h2><p>The MAC-derived hardware identity stays with the panel; Arc ID assignments can move.</p></div><span class="refresh-note">Auto refresh every 10 seconds</span></div>
+        @if (devices.Count == 0) { <div class="empty">No panels have connected yet. Connect an ESP32 to Wi-Fi and ArcServer.</div> }
+        else { <div class="table-wrap"><table><thead><tr><th>DEVICE IDENTITY</th><th>CURRENT ARC ID</th><th>LAST IP</th><th>FIRMWARE</th><th>LAST SEEN</th><th></th></tr></thead><tbody>
+            @foreach (var device in devices)
+            {
+                <tr><td class="mono"><button class="text-button mono" @onclick="() => InspectDevice(device)">@device.DeviceIdentity</button></td><td><select class="table-select" value="@SelectedAssignment(device)" @onchange="e => ChangeAssignmentAsync(device, e.Value?.ToString())"><option value="">Unassigned</option>@foreach (var id in arcIds.Where(x => x.Enabled)) { <option value="@id.ArcId">@id.ArcId @(id.IsOperational ? "(operational)" : "")</option> }</select></td><td class="mono">@(device.LastKnownIp ?? "—")</td><td>@(device.FirmwareVersion ?? "Unknown")</td><td>@Seen(device.LastSeenUtc)</td><td><span class="state @(IsOnline(device.LastSeenUtc) ? "state-online" : "state-offline")">@(IsOnline(device.LastSeenUtc) ? "Online" : "Offline")</span></td></tr>
+            }
+        </tbody></table></div> }
+    </section>
+}
+else if (activeTab == "diagnostics")
+{
+    <section class="section-card"><div class="section-heading"><div><h2>Diagnostics</h2><p>Live registry state reported by ArcServer.</p></div></div><div class="diagnostic-grid"><div><span>API endpoint</span><strong>http://127.0.0.1:5081</strong></div><div><span>Database</span><strong>ArcServer.db · SQLite</strong></div><div><span>TCP panel port</span><strong>5000</strong></div><div><span>Last refresh</span><strong>@updatedText</strong></div></div><p class="help-text">Device presence is based on the panel's latest heartbeat. Offline devices remain in the registry and can be reassigned.</p></section>
+}
+</div>
+}
+@code {
+    private readonly (string Key, string Label)[] tabs = [("overview", "Overview"), ("arcids", "Arc IDs"), ("devices", "Devices"), ("diagnostics", "Diagnostics")];
+    private IReadOnlyList<ArcIdRecord> arcIds = [];
+    private IReadOnlyList<ArcDeviceRecord> devices = [];
+    private ArcServerStatus? serverStatus;
+    private string activeTab = "overview", updatedText = "Not refreshed", errorMessage = "", successMessage = "";
+    private string enteredPin = "", loginError = "";
+    private bool editing, formEnabled = true;
+    private string? editingId;
+    private string formArcId = "", formRoomId = "", formRoomName = "", formSetpoint = "";
+    [CascadingParameter] private MainLayout? Layout { get; set; }
+    private PeriodicTimer? timer;
+    private CancellationTokenSource? refreshCancellation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += HandleLocationChanged;
+        SetTabFromUri(Navigation.Uri);
+        await RefreshAsync();
+        refreshCancellation = new CancellationTokenSource();
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        _ = AutoRefreshAsync(refreshCancellation.Token);
+    }
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        SetTabFromUri(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+    private void SetTabFromUri(string uri)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(uri).Query);
+        if (query.TryGetValue("tab", out var tab) && tabs.Any(x => x.Key == tab.ToString())) activeTab = tab.ToString();
+    }
+    private async Task AutoRefreshAsync(CancellationToken token)
+    {
+        try { while (timer is not null && await timer.WaitForNextTickAsync(token)) { await RefreshAsync(); await InvokeAsync(StateHasChanged); } }
+        catch (OperationCanceledException) { }
+    }
+    private async Task RefreshAsync()
+    {
+        try { arcIds = await Api.GetArcIdsAsync(); devices = await Api.GetDevicesAsync(); serverStatus = await Api.GetStatusAsync(); updatedText = DateTime.Now.ToString("HH:mm:ss"); errorMessage = ""; }
+        catch (Exception ex) { errorMessage = $"Could not reach ArcServer API: {ex.Message}"; }
+    }
+    private async Task SelectTab(string tab) { activeTab = tab; editing = false; successMessage = ""; await Task.CompletedTask; }
+    private void NewArcId() { editingId = null; formArcId = ""; formRoomId = ""; formRoomName = ""; formSetpoint = ""; formEnabled = true; editing = true; }
+    private void EditArcId(ArcIdRecord item) { editingId = item.ArcId; formArcId = item.ArcId; formRoomId = item.RoomId; formRoomName = item.RoomName; formSetpoint = item.SetpointName; formEnabled = item.Enabled; editing = true; }
+    private void CancelEdit() => editing = false;
+    private void Login()
+    {
+        if (Session.TryAuthenticate(enteredPin, AdminAccess)) { loginError = ""; enteredPin = ""; }
+        else loginError = "Incorrect PIN.";
+    }
+    private void LockArc() => Session.SignOut();
+    private Task ShowArcIds() => SelectTab("arcids");
+    private Task ShowDevices() => SelectTab("devices");
+    private async Task SaveArcIdAsync()
+    {
+        var input = new ArcIdInput(formArcId.Trim(), formRoomId.Trim(), formRoomName.Trim(), formSetpoint.Trim(), formEnabled);
+        using var response = editingId is null ? await Api.CreateArcIdAsync(input) : await Api.UpdateArcIdAsync(editingId, input);
+        if (!response.IsSuccessStatusCode) { errorMessage = await response.Content.ReadAsStringAsync(); return; }
+        editing = false; errorMessage = ""; successMessage = $"Saved {input.ArcId}."; await RefreshAsync();
+    }
+    private async Task DeleteArcIdAsync(string id)
+    {
+        using var response = await Api.DeleteArcIdAsync(id);
+        if (!response.IsSuccessStatusCode) { errorMessage = "Could not delete this Arc ID. It may be assigned."; return; }
+        successMessage = $"Deleted {id}."; await RefreshAsync();
+    }
+    private async Task ChangeAssignmentAsync(ArcDeviceRecord device, string? arcId)
+    {
+        using var response = string.IsNullOrWhiteSpace(arcId) ? await Api.UnassignAsync(device.DeviceIdentity) : await Api.AssignAsync(arcId, device.DeviceIdentity);
+        if (!response.IsSuccessStatusCode) errorMessage = await response.Content.ReadAsStringAsync();
+        else { errorMessage = ""; successMessage = string.IsNullOrWhiteSpace(arcId) ? $"Unassigned {device.DeviceIdentity}." : $"Assigned {arcId} to {device.DeviceIdentity}."; }
+        await RefreshAsync();
+    }
+    private string SelectedAssignment(ArcDeviceRecord device) => device.ArcId ?? "";
+    private static string Temp(double? value) => value?.ToString("F1") ?? "—";
+    private string HaStateClass => serverStatus?.HomeAssistantStatus == "Online" ? "state-online" : "state-offline";
+    private bool IsOnline(string? value) => DateTimeOffset.TryParse(value, out var seen) && DateTimeOffset.UtcNow - seen < TimeSpan.FromSeconds(15);
+    private string Seen(string? value) => DateTimeOffset.TryParse(value, out var seen) ? seen.ToLocalTime().ToString("HH:mm:ss") : "—";
+    private void InspectArcId(ArcIdRecord item) => Layout?.ShowProperties(item.ArcId, [new("Role", item.Role), new("Instance", item.InstanceNumber.ToString()), new("Operational", item.IsOperational ? "Yes" : "No"), new("Room", item.RoomName), new("Device", item.DeviceIdentity ?? "Available"), new("Last IP", item.LastKnownIp ?? "—")]);
+    private void InspectDevice(ArcDeviceRecord item) => Layout?.ShowProperties(item.DeviceIdentity, [new("Arc ID", item.ArcId ?? "Unassigned"), new("Room", item.RoomName ?? "—"), new("Last IP", item.LastKnownIp ?? "—"), new("Firmware", item.FirmwareVersion ?? "Unknown"), new("Last seen", Seen(item.LastSeenUtc))]);
+    public void Dispose() { Navigation.LocationChanged -= HandleLocationChanged; refreshCancellation?.Cancel(); timer?.Dispose(); refreshCancellation?.Dispose(); }
+}

@@ -16,22 +16,23 @@ Do not infer an exact IDE build or board-package revision from source files. Fir
 
 ## Repository Structure
 
-`source/Server/ArcPanel.Server.slnx` is the C# solution; `source/Server/ArcPanel.Server/` contains the TCP server, `HomeAssistantMonitor.cs`, and `InformationFeeds.cs`. `source/Client/ArcPanel/ArcPanel.ino` contains the Arduino firmware. `docs/` contains project documentation.
+`source/Server/ArcServer.slnx` includes the .NET 10 ArcServer and Arc applications. `source/Server/ArcServer/` contains the TCP server, REST API, SQLite registry, `HomeAssistantMonitor.cs`, and `InformationFeeds.cs`. `source/Arc/` contains the Blazor Server UI. `source/Client/ArcPanel/ArcPanel.ino` contains the Arduino firmware.
 
 ## Configuration and Secrets
 
-Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, and configure Wi-Fi, server LAN IPv4 address, and room ID. Never commit `Secrets.h`.
+Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, and configure Wi-Fi and server LAN IPv4 address. The panel selects an Arc ID from server-provided choices. Never commit `Secrets.h`.
 
-The server listens on TCP port **5000** on the LAN. Set optional environment variables `ARC_LATITUDE`, `ARC_LONGITUDE`, `ARC_LOCATION_NAME` for public information feeds. Home Assistant integration uses `ARC_HA_URL`, `ARC_HA_TOKEN`, `ARC_HA_LIVING_ROOM_ENTITY`, `ARC_HA_KITCHEN_ENTITY`, and `ARC_HA_ALERT_ENTITY`. Keep tokens server-side. GuestBedroom entity IDs are currently hard-coded in `HomeAssistantMonitor.cs`; review before deployment to a different installation.
+ArcServer listens on TCP port **5000** on the LAN and a loopback REST API on **5081**. Arc listens on **5080**. Arc generates a temporary management PIN at startup; set `ARC_ADMIN_PIN` on Arc to use a persistent PIN. The SQLite registry defaults to `%LOCALAPPDATA%\\Arc\\ArcServer.db`; override with `ARC_DATABASE_PATH`. Set optional environment variables `ARC_LATITUDE`, `ARC_LONGITUDE`, `ARC_LOCATION_NAME` for public information feeds. Home Assistant integration uses `ARC_HA_URL`, `ARC_HA_TOKEN`, `ARC_HA_LIVING_ROOM_ENTITY`, `ARC_HA_KITCHEN_ENTITY`, and `ARC_HA_ALERT_ENTITY`. Keep tokens server-side. GuestBedroom entity IDs are currently hard-coded in `HomeAssistantMonitor.cs`; review before deployment to a different installation.
 
 ## Build and Run
 
 Open the server solution in Visual Studio 2026, or run:
 
 ```powershell
-dotnet restore source/Server/ArcPanel.Server.slnx
-dotnet build source/Server/ArcPanel.Server.slnx
-dotnet run --project source/Server/ArcPanel.Server
+dotnet restore source/Server/ArcServer.slnx
+dotnet build source/Server/ArcServer.slnx
+dotnet run --project source/Server/ArcServer
+dotnet run --project source/Arc
 ```
 
 In Arduino IDE, install the Espressif ESP32 board support, GFX Library for Arduino, and ArduinoJson 7. Select **ESP32S3 Dev Module**, retain the board's existing **USB CDC On Boot** setting, upload `ArcPanel.ino`, and monitor serial at **115200 baud**. The Windows server can use Ethernet while the panel uses Wi-Fi if both are on a reachable trusted LAN.

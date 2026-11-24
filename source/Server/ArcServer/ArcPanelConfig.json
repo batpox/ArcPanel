@@ -1,0 +1,24 @@
+{
+  "Panels": {
+    "GuestBedroom-1": {
+      "Setpoints": {
+        "GuestBedroomSetpoint": {
+          "EntityId": "input_number.guest_bedroom_temperature_setpoint",
+          "ArgumentName": "TempF",
+          "Minimum": 50,
+          "Maximum": 85
+        }
+      }
+    },
+    "GuestBedroom-2": {
+      "Setpoints": {
+        "GuestBedroomSetpoint": {
+          "EntityId": "input_number.guest_bedroom_temperature_setpoint",
+          "ArgumentName": "TempF",
+          "Minimum": 50,
+          "Maximum": 85
+        }
+      }
+    }
+  }
+}

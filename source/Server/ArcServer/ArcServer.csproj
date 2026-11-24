@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <None Update="ArcPanelConfig.json" CopyToOutputDirectory="PreserveNewest" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
   </ItemGroup>
 </Project>
 

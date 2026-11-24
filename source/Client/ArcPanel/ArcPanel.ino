@@ -11,13 +11,6 @@
 #include <Fonts/FreeSansBold12pt7b.h>
 #include "Secrets.h"
 
-#ifndef PANEL_ID
-#define PANEL_ID ROOM_ID
-#endif
-#ifndef SETPOINT_NAME
-#define SETPOINT_NAME "RoomSetpoint"
-#endif
-
 // Waveshare ESP32-S3-Touch-LCD-2: ST7789 240x320 and CST816D (0x15).
 // Arduino IDE: ESP32S3 Dev Module, USB CDC On Boot disabled (preserve working configuration).
 // Install "GFX Library for Arduino" using Library Manager.
@@ -36,7 +29,11 @@ Arduino_DataBus *bus = new Arduino_ESP32SPI(42, 45, 39, 38, 40);
 Arduino_GFX *gfx = new Arduino_ST7789(bus, GFX_NOT_DEFINED, 0, true, SCREEN_W, SCREEN_H);
 WiFiClient client;
 Preferences preferences;
-String deviceId, panelId, roomId, roomName, receiveBuffer;
+String deviceId, panelId, roomId, roomName, arcSetpointName, receiveBuffer;
+String assignmentArcIds[3], assignmentRoomNames[3];
+uint8_t assignmentCount = 0;
+uint8_t assignmentPage = 0, assignmentPageCount = 1;
+bool assignmentPending = false;
 unsigned long lastSend = 0, lastRetry = 0, lastWifiRetry = 0;
 unsigned long lastAck = 0, lastDraw = 0, lastTouch = 0, setpointChangedAt = 0;
 float roomTemp = NAN, roomHumidity = NAN, setpoint = 70.0f;
@@ -48,6 +45,7 @@ static constexpr uint8_t BODY_SCALE = 2;
 static constexpr int TAB_HEIGHT = 66, TAB_BOTTOM = TAB_HEIGHT + 3; // 69px touch targets
 // Body text is 12px wide; tab labels use large 12x16px glyphs.
 bool pendingSetpoint = false, haveHaInfo = false;
+bool isOperational = false, assignmentEnabled = false;
 bool awaitingSetpointAck = false;
 String pendingCommandId;
 float pendingCommandValue = NAN;
@@ -310,6 +308,28 @@ void drawTickers(unsigned long now) {
  */
 void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
+  if (panelId.isEmpty()) {
+    drawText(10, 78, "Choose Arc ID", ACCENT, 2);
+    drawText(10, 102, "Device " + deviceId.substring(max(0, (int)deviceId.length() - 6)), MUTED);
+    if (assignmentPending) drawText(10, 128, "Requesting assignment...", MUTED);
+    else if (assignmentCount == 0) drawText(10, 128, "Waiting for ArcServer", MUTED);
+    for (uint8_t i = 0; i < assignmentCount; ++i) {
+      int y = 140 + i * 40;
+      gfx->fillRoundRect(8, y, 224, 34, 6, PANEL);
+      drawText(18, y + 8, clipped(assignmentArcIds[i], 16), WHITE_TEXT);
+      drawText(130, y + 8, clipped(assignmentRoomNames[i], 12), MUTED);
+    }
+    if (assignmentCount == 0 && !assignmentPending)
+      drawText(10, 164, "Add an available ID in Arc.", MUTED);
+    if (assignmentPageCount > 1) {
+      gfx->fillRoundRect(8, 263, 78, 25, 5, PANEL);
+      gfx->fillRoundRect(154, 263, 78, 25, 5, PANEL);
+      drawText(18, 270, "< Prev", WHITE_TEXT);
+      drawText(166, 270, "Next >", WHITE_TEXT);
+      drawText(104, 270, String(assignmentPage + 1) + "/" + String(assignmentPageCount), MUTED);
+    }
+    return;
+  }
   if (selectedTab == 0) {
     // Two-zone layout: live measurement left; adjustable target right.
     lastClockMinute = "";
@@ -324,13 +344,15 @@ void drawContent() {
     drawText(24, 228, String(temperatureUnits), GREEN_TEXT, 2);
     drawText(17, 259, isnan(roomHumidity) ? "RH --" : "RH " + String(roomHumidity, 0) + "%", MUTED);
     // Two large touch targets, with the requested temperature between them.
-    gfx->fillRoundRect(135, 175, 85, 31, 9, ACCENT);
-    drawChevron(177, 190, true, BG);
+    bool canChangeSetpoint = isOperational && assignmentEnabled;
+    gfx->fillRoundRect(135, 175, 85, 31, 9, canChangeSetpoint ? ACCENT : PANEL);
+    drawChevron(177, 190, true, canChangeSetpoint ? BG : MUTED);
     drawText(132, 212, !haveHaInfo && !pendingSetpoint ? "--" : String(displayTemp(setpoint), 1), WHITE_TEXT, 2);
     drawText(206, 217, String(temperatureUnits), MUTED);
-    gfx->fillRoundRect(135, 232, 85, 31, 9, ACCENT);
-    drawChevron(177, 247, false, BG);
+    gfx->fillRoundRect(135, 232, 85, 31, 9, canChangeSetpoint ? ACCENT : PANEL);
+    drawChevron(177, 247, false, canChangeSetpoint ? BG : MUTED);
     if (pendingSetpoint) drawText(129, 267, "Pending", ACCENT);
+    else if (!canChangeSetpoint) drawText(129, 267, "Read-only", MUTED);
     else drawText(129, 273, guestFloorState < 0 ? "Heat: --" : (guestFloorState ? "Heat: ON" : "Heat: OFF"), MUTED);
   } else if (selectedTab == 1) {
     drawText(12, 76, "ARC House", ACCENT, 2);
@@ -349,8 +371,9 @@ void drawContent() {
       drawText(8, 225 + i * 19, clipped(headlines[i], 19), WHITE_TEXT, BODY_SCALE);
   } else {
     drawText(12, 76, "Settings", ACCENT, 2);
-    drawText(12, 98, "ID:" + clipped(roomId, 16), WHITE_TEXT, BODY_SCALE);
+    drawText(12, 98, "ArcID:" + clipped(panelId, 13), WHITE_TEXT, BODY_SCALE);
     drawText(12, 125, clipped(roomName, 18), WHITE_TEXT, BODY_SCALE);
+    drawText(12, 148, "Device:" + deviceId.substring(max(0, (int)deviceId.length() - 6)), MUTED);
     drawText(12, 158, "Beats: " + String(heartbeatCount), WHITE_TEXT, BODY_SCALE);
     drawText(12, 185, String("ACK: ") + (lastAck ? String((millis()-lastAck)/1000) + "s ago" : "none"), WHITE_TEXT, BODY_SCALE);
     drawText(12, 212, "Interval: 2 seconds", MUTED);
@@ -419,6 +442,45 @@ void handleServerMessage(const String& line) {
   const char* type = doc["type"] | "";
   if (strcmp(type, "ack") == 0) {
     lastAck = millis();
+    if (doc["operational"].is<bool>()) isOperational = doc["operational"].as<bool>();
+    if (doc["assignmentEnabled"].is<bool>()) assignmentEnabled = doc["assignmentEnabled"].as<bool>();
+    if (doc["arcId"].is<const char*>()) {
+      String assignedArcId = doc["arcId"].as<String>();
+      if (assignedArcId != panelId) {
+        panelId = assignedArcId;
+        preferences.putString("ArcID", panelId);
+      }
+      if (doc["roomId"].is<const char*>()) {
+        roomId = doc["roomId"].as<String>();
+        preferences.putString("RoomId", roomId);
+      }
+      if (doc["roomName"].is<const char*>()) {
+        roomName = doc["roomName"].as<String>();
+        preferences.putString("RoomName", roomName);
+      }
+      if (doc["setpointName"].is<const char*>()) {
+        arcSetpointName = doc["setpointName"].as<String>();
+        preferences.putString("SetpointName", arcSetpointName);
+      }
+      assignmentPending = false;
+      dirty = true;
+    } else if (doc["arcId"].isNull() && doc["requestType"].as<String>() == "heartbeat") {
+      panelId = "";
+      roomId = "";
+      roomName = "Unassigned";
+      arcSetpointName = "";
+      isOperational = false;
+      assignmentEnabled = false;
+      preferences.remove("ArcID");
+      preferences.remove("RoomId");
+      preferences.remove("RoomName");
+      preferences.remove("SetpointName");
+      dirty = true;
+    }
+    if (doc["assignmentAccepted"].is<bool>() && doc["assignmentAccepted"].as<bool>()) {
+      assignmentPending = false;
+      assignmentCount = 0;
+    }
     const char* commandId = doc["commandId"] | "";
     if (pendingCommandId.length() && pendingCommandId == commandId && doc["commandAccepted"].is<bool>()) {
       awaitingSetpointAck = false;
@@ -438,6 +500,19 @@ void handleServerMessage(const String& line) {
     }
     if (selectedTab == 3) updateSettingsTelemetry();
     // Server echoes the accepted units; device preference remains authoritative.
+  } else if (strcmp(type, "assignment-options") == 0) {
+    assignmentCount = 0;
+    assignmentPage = doc["page"] | 0;
+    assignmentPageCount = doc["pageCount"] | 1;
+    JsonArray choices = doc["arcIds"].as<JsonArray>();
+    for (JsonObject choice : choices) {
+      if (assignmentCount >= 3) break;
+      assignmentArcIds[assignmentCount] = choice["arcId"] | "";
+      assignmentRoomNames[assignmentCount] = choice["roomName"] | "";
+      ++assignmentCount;
+    }
+    assignmentPending = false;
+    dirty = true;
   } else if (strcmp(type, "news") == 0) {
     if (line == lastNewsPayload) return; // Server sends cached news with each heartbeat.
     lastNewsPayload = line;
@@ -513,6 +588,21 @@ bool readTouch(uint16_t& x, uint16_t& y) {
   return x < SCREEN_W && y < SCREEN_H;
 }
 
+/** @brief Requests another page of available Arc IDs from ArcServer. */
+void requestArcIdPage(uint8_t page) {
+  JsonDocument request;
+  request["type"] = "list-arc-ids";
+  request["deviceId"] = deviceId;
+  request["page"] = page;
+  String payload;
+  serializeJson(request, payload);
+  if (client.connected() && client.println(payload) > 0) {
+    assignmentPending = true;
+    logMessage("TX: " + payload);
+    refreshContent();
+  }
+}
+
 /**
  * @brief Processes touch input, including tabs, setpoint controls, and settings.
  * @param now now input or output value.
@@ -521,7 +611,27 @@ void pollTouch(unsigned long now) {
   if (now - lastTouch < 200) return;
   uint16_t x, y;
   if (!readTouch(x, y)) return;
-  if (y <= TAB_BOTTOM) {
+  if (panelId.isEmpty()) {
+    if (!assignmentPending && assignmentCount > 0 && y >= 140 && y < 260) {
+      uint8_t index = (y - 140) / 40;
+      if (index < assignmentCount) {
+        JsonDocument claim;
+        claim["type"] = "claim-arc-id";
+        claim["deviceId"] = deviceId;
+        claim["arcId"] = assignmentArcIds[index];
+        String payload;
+        serializeJson(claim, payload);
+        if (client.connected() && client.println(payload) > 0) {
+          assignmentPending = true;
+          logMessage("TX: " + payload);
+          refreshContent();
+        }
+      }
+    } else if (!assignmentPending && assignmentPageCount > 1 && y >= 263 && y < 292) {
+      if (x < 100 && assignmentPage > 0) requestArcIdPage(assignmentPage - 1);
+      else if (x >= 145 && assignmentPage + 1 < assignmentPageCount) requestArcIdPage(assignmentPage + 1);
+    }
+  } else if (y <= TAB_BOTTOM) {
     uint8_t tab = x / 60;
     if (tab < 4 && tab != selectedTab) {
       selectedTab = tab;
@@ -540,7 +650,7 @@ void pollTouch(unsigned long now) {
       logMessage(String("TemperatureUnits changed to ") + temperatureUnits);
       refreshContent();
     }
-  } else if (selectedTab == 0) {
+  } else if (selectedTab == 0 && isOperational && assignmentEnabled) {
     // Half-degree increments in selected units; wire protocol remains Fahrenheit.
     if (x >= 130 && x <= 225) {
       float step = temperatureUnits == 'C' ? 1.8f : 1.0f; // HA helper uses 1°F steps
@@ -570,13 +680,14 @@ void setup() {
   char id[32];
   snprintf(id, sizeof(id), "ESP32-%012llX", (unsigned long long)mac);
   deviceId = id;
-  panelId = PANEL_ID;
-  roomId = ROOM_ID;
+  panelId = preferences.getString("ArcID", "");
+  roomId = preferences.getString("RoomId", "");
+  arcSetpointName = preferences.getString("SetpointName", "");
   String savedUnits = preferences.getString("TemperatureUnits", "F");
   temperatureUnits = savedUnits == "C" ? 'C' : 'F';
   // A locally cached server-assigned display name may override the default.
-  roomName = preferences.getString("room", roomId);
-  if (roomName == "Unassigned" || roomName.isEmpty()) roomName = roomId;
+  roomName = preferences.getString("RoomName", roomId);
+  if (roomName == "Unassigned" || roomName.isEmpty()) roomName = "Unassigned";
   logMessage("Device: " + deviceId + " | PanelId: " + panelId + " | RoomId: " + roomId + " | RoomName: " + roomName);
 
   pinMode(LCD_BL, OUTPUT);
@@ -666,7 +777,7 @@ void loop() {
           command["roomId"] = roomId;
           command["commandId"] = pendingCommandId;
           command["command"] = "ChangeSetpoint";
-          command["arguments"]["SetpointName"] = SETPOINT_NAME;
+          command["arguments"]["SetpointName"] = arcSetpointName;
           command["arguments"]["TempF"] = setpoint;
           String commandPayload;
           serializeJson(command, commandPayload);

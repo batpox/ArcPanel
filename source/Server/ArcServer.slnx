@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ArcServer/ArcServer.csproj" />
+  <Project Path="../Arc/Arc.csproj" />
+</Solution>

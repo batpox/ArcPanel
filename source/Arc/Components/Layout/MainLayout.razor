@@ -1,0 +1,58 @@
+@inherits LayoutComponentBase
+<div class="shell @(explorerCollapsed ? "explorer-collapsed" : "") @(propertiesCollapsed ? "properties-collapsed" : "")">
+    <header class="topbar">
+        <div class="brand"><span class="brand-mark">A</span><span>Arc</span><small>Area Resource Control</small></div>
+        <nav class="top-actions" aria-label="Application actions">
+            <a href="/">File</a><a href="/">View</a><a href="/">Tools</a>
+            <button class="layout-toggle" @onclick="ToggleExplorer">Explorer</button>
+            <button class="layout-toggle" @onclick="ToggleProperties">Properties</button>
+            <span class="top-spacer"></span>
+            <span class="server-chip"><i></i> ArcServer</span>
+        </nav>
+    </header>
+    <main class="workspace-shell">
+        <aside class="explorer">
+            <div class="pane-title">EXPLORER</div>
+            <div class="tree-group">⌄ &nbsp; Arc</div>
+            <a class="tree-link" href="/?tab=overview">◫ &nbsp; Overview</a>
+            <a class="tree-link" href="/?tab=arcids">▦ &nbsp; Arc IDs</a>
+            <a class="tree-link" href="/?tab=devices">▣ &nbsp; Devices</a>
+            <div class="tree-group utilities">⌄ &nbsp; Utilities</div>
+            <a class="tree-link" href="/?tab=diagnostics">◷ &nbsp; Diagnostics</a>
+            <div class="explorer-footer"><span class="pulse"></span> Live registry</div>
+        </aside>
+        <section class="center-pane"><CascadingValue Value="this">@Body</CascadingValue></section>
+        <aside class="properties-pane">
+            <div class="pane-title">PROPERTIES</div>
+            <div class="properties-content">
+                @if (PropertiesTitle is null)
+                {
+                    <div class="property-icon">⌘</div><strong>Arc registry</strong>
+                    <p>Select an Arc ID or device to inspect its assignment and connection details.</p>
+                }
+                else
+                {
+                    <div class="property-icon">⌘</div><strong>@PropertiesTitle</strong>
+                    @foreach (var item in Properties)
+                    {
+                        <div class="inspector-row"><span>@item.Key</span><strong class="@(item.Value.Length > 12 ? "mono" : "")">@item.Value</strong></div>
+                    }
+                }
+            </div>
+        </aside>
+    </main>
+    <footer class="statusbar"><span>● &nbsp; ArcServer API</span><span>LAN automation monitor</span><span class="status-right">.NET 10 &nbsp;·&nbsp; Arc</span></footer>
+</div>
+@code {
+    private bool explorerCollapsed, propertiesCollapsed;
+    public string? PropertiesTitle { get; private set; }
+    public IReadOnlyList<KeyValuePair<string, string>> Properties { get; private set; } = [];
+    private void ToggleExplorer() => explorerCollapsed = !explorerCollapsed;
+    private void ToggleProperties() => propertiesCollapsed = !propertiesCollapsed;
+    public void ShowProperties(string title, IReadOnlyList<KeyValuePair<string, string>> properties)
+    {
+        PropertiesTitle = title;
+        Properties = properties;
+        _ = InvokeAsync(StateHasChanged);
+    }
+}

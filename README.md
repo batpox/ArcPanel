@@ -1,19 +1,22 @@
 # ArcPanel
 
-**Area Resource Control** — networked ESP32-S3 touchscreen room panels and a C#/.NET coordination server.
+**Area Resource Control** — ESP32-S3 touchscreen panels, a headless C#/.NET server, and the Arc Blazor monitoring app.
 
-- **Windows 11 server:** .NET 10, TCP/JSON, multi-client device registry, configurable Home Assistant setpoint routing.
-- **ESP32-S3 panels:** Arduino C++, local SHT40 temperature/humidity, room identity, touchscreen setpoints.
+- **ArcServer:** .NET 10, TCP/JSON panel service, REST management API, and SQLite device/Arc ID registry.
+- **Arc:** .NET 10 Blazor Server UI using Dan's Standard Layout to monitor devices and manage assignments.
+- **ArcPanel:** Arduino firmware for ESP32-S3 touchscreen panels with touch-based Arc ID selection.
 - **Home Assistant:** sole authority for radiant heating actuation and energy-train logic.
 
 ## Repository layout
 
 ```text
 source/
+  Arc/
+    Arc.csproj
   Server/
-    ArcPanel.Server.slnx
-    ArcPanel.Server/
-      ArcPanel.Server.csproj
+    ArcServer.slnx
+    ArcServer/
+      ArcServer.csproj
       Program.cs
   Client/
     ArcPanel/
@@ -27,12 +30,12 @@ docs/
 
 ## Getting started
 
-1. Open `source/Server/ArcPanel.Server.slnx` in Visual Studio 2026 and run the .NET 10 console server. Edit `ArcPanelConfig.json` for the panel and HA helper mappings.
-2. Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, then enter Wi-Fi credentials, the server's Ethernet IPv4 address, and the panel's `ROOM_ID`, `PANEL_ID`, and `SETPOINT_NAME`.
+1. Open `source/Server/ArcServer.slnx` in Visual Studio 2026 and run ArcServer and Arc as separate projects (or set both as startup projects). ArcServer listens for panels on TCP 5000 and exposes its local management API on port 5081. Arc serves its browser UI on port 5080 and prints a temporary management PIN at startup.
+2. Copy `source/Client/ArcPanel/Secrets.example.h` to `Secrets.h`, then enter Wi-Fi credentials and the server's LAN IPv4 address. The panel's Arc ID and room configuration are assigned through its touchscreen and ArcServer.
 3. Install **GFX Library for Arduino** and **ArduinoJson 7** from Arduino IDE Library Manager. Open `ArcPanel.ino`, select **ESP32S3 Dev Module**, enable **USB CDC On Boot**, upload and monitor at **115200 baud**.
-4. The server listens on TCP port **5000**. Allow private-LAN inbound access in Windows Firewall.
+4. Allow private-LAN inbound access to ArcServer TCP **5000** and Arc HTTP **5080** in Windows Firewall. The management API defaults to loopback port **5081**.
 
-The ESP32 display has four touch-selectable tabs in one row: ARC Room, ARC House, News, and Settings. The Room tab allows setpoint adjustment. After a 3-second idle delay, the panel sends a `ChangeSetpoint` command with its logical panel ID, setpoint name, and Fahrenheit value. The server maps the request through `ArcPanelConfig.json` and calls only Home Assistant's `input_number.set_value`; it does not issue relay commands. Settings shows the panel and room IDs, heartbeat count, and latest acknowledgement. The 240x320 display uses ST7789 (Arduino_GFX) and CST816D (I2C); these pins are specific to Waveshare ESP32-S3-Touch-LCD-2. Do not commit `Secrets.h`.
+On first connection, a panel reports its MAC-derived hardware identity. ArcServer sends available IDs; the panel displays them as touch choices. Arc IDs use `Role-N` (for example, `GuestBedroom-1`); instance `-1` is operational, and other instances cannot change heating setpoints. Arc can add IDs, show discovered devices, and transfer an ID to another panel. Settings shows the Arc ID, hardware identity, heartbeat count, and latest acknowledgement. The 240x320 display uses ST7789 (Arduino_GFX) and CST816D (I2C); these pins are specific to Waveshare ESP32-S3-Touch-LCD-2. Do not commit `Secrets.h`.
 
 See [development instructions](docs/Development.md), [architecture](docs/Architecture.md), and [protocol](docs/Protocol.md).
 
@@ -140,9 +143,9 @@ action. It does not call any relay or switch control action.
 
 ### GuestBedroom live Room tab (Home Assistant)
 
-Set `ROOM_ID "GuestBedroom"`, `PANEL_ID "GuestBed"`, and
-`SETPOINT_NAME "GuestBedroomSetpoint"` in the panel's local `Secrets.h`.
-Set `ARC_HA_URL` and `ARC_HA_TOKEN`
+Select `GuestBedroom-1` on the panel or assign it in Arc. The server registry
+stores `RoomId`, display name and `SetpointName` for each Arc ID. Set
+`ARC_HA_URL` and `ARC_HA_TOKEN`
 on the Windows server before launching it. For this installation the expected
 HA entities are:
 
@@ -158,7 +161,7 @@ and humidity telemetry is no longer sent. Humidity remains unavailable until
 a real HA humidity source or SHT40 integration is configured.
 
 GuestBedroom setpoint changes travel as a `ChangeSetpoint` command. The server
-maps `PANEL_ID` and `SETPOINT_NAME` through `ArcPanelConfig.json`, checks
+maps the assigned Arc ID and registry `SetpointName` through `ArcPanelConfig.json`, checks
 `TempF` against the configured range, then calls HA's `input_number.set_value`
 action. It does not call a switch-control action. HA remains the heating
 authority. ARC confirms the update by rereading the helper, and a later HA poll
@@ -166,8 +169,34 @@ synchronizes the panel. **This integration uses
 30-second REST polling, not WebSocket updates**. Ensure the HA entity IDs
 above actually exist; renaming a helper does not necessarily rename its ID.
 
-The sample mapping is in `source/Server/ArcPanel.Server/ArcPanelConfig.json`.
+The sample mapping is in `source/Server/ArcServer/ArcPanelConfig.json`.
 Override its path with `ARC_CONFIG_PATH`. Server exchanges and diagnostics are
 appended to daily files under `logs/`; override that folder with
 `ARC_LOG_DIRECTORY`. Keep `ARC_HA_TOKEN` on the server, not on a panel.
+
+### Arc registry and UI
+
+ArcServer keeps configured IDs in SQLite table `ArcIds` and discovered
+hardware identities plus current assignments in `ArcDevices`. The default DB
+is `%LOCALAPPDATA%\\Arc\\ArcServer.db`; override it with `ARC_DATABASE_PATH`.
+On first run, ArcServer creates `GuestBedroom-1` and `GuestBedroom-2` when
+missing. `-1` is always marked operational; other role instances are
+non-operational.
+
+Arc is a separate .NET 10 Blazor Server app. It follows Dan's Standard Layout:
+top actions, left explorer, center workspace tabs, right properties, and a
+bottom status bar. Arc requires a six-digit PIN printed at startup; set
+`ARC_ADMIN_PIN` on Arc to use a persistent PIN. Arc listens on port 5080.
+ArcServer's REST API defaults to
+loopback port 5081 because Arc calls it server-side; set `ArcServer:ApiBaseUrl`
+if the server runs on another host. Set `Arc:UIUrls` to change the browser
+listener. Keep TCP 5000 and HTTP 5080 restricted to the trusted private LAN.
+
+Arc IDs are reusable and hardware identities stay with the physical ESP32.
+Transferring an ID in Arc clears it from the previous device and assigns it to
+the selected device; the panel receives the new assignment on its next
+heartbeat. The hardware identity is for recognition, not authentication. The
+panel protocol does not yet authenticate devices or encrypt traffic. Arc's PIN
+protects management actions, but its HTTP session is not encrypted; keep both
+applications on a trusted private LAN.
 
