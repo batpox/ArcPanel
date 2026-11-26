@@ -308,7 +308,7 @@ void drawTickers(unsigned long now) {
  */
 void drawContent() {
   gfx->fillRect(0, TAB_BOTTOM + 2, SCREEN_W, 294 - TAB_BOTTOM - 2, BG);
-  if (panelId.isEmpty()) {
+  if (selectedTab == 0 && panelId.isEmpty()) {
     drawText(10, 78, "Choose Arc ID", ACCENT, 2);
     drawText(10, 102, "Device " + deviceId.substring(max(0, (int)deviceId.length() - 6)), MUTED);
     if (assignmentPending) drawText(10, 128, "Requesting assignment...", MUTED);
@@ -611,7 +611,14 @@ void pollTouch(unsigned long now) {
   if (now - lastTouch < 200) return;
   uint16_t x, y;
   if (!readTouch(x, y)) return;
-  if (panelId.isEmpty()) {
+  if (y <= TAB_BOTTOM) {
+    uint8_t tab = x / 60;
+    if (tab < 4 && tab != selectedTab) {
+      selectedTab = tab;
+      dirty = true;
+      logMessage(String("Selected tab: ") + tabNames[tab]);
+    }
+  } else if (selectedTab == 0 && panelId.isEmpty()) {
     if (!assignmentPending && assignmentCount > 0 && y >= 140 && y < 260) {
       uint8_t index = (y - 140) / 40;
       if (index < assignmentCount) {
@@ -630,13 +637,6 @@ void pollTouch(unsigned long now) {
     } else if (!assignmentPending && assignmentPageCount > 1 && y >= 263 && y < 292) {
       if (x < 100 && assignmentPage > 0) requestArcIdPage(assignmentPage - 1);
       else if (x >= 145 && assignmentPage + 1 < assignmentPageCount) requestArcIdPage(assignmentPage + 1);
-    }
-  } else if (y <= TAB_BOTTOM) {
-    uint8_t tab = x / 60;
-    if (tab < 4 && tab != selectedTab) {
-      selectedTab = tab;
-      dirty = true;
-      logMessage(String("Selected tab: ") + tabNames[tab]);
     }
   } else if (selectedTab == 2 && ((y >= 116 && y < 146) || (y >= 176 && y < 206))) {
     tickerPaused = !tickerPaused;
@@ -813,7 +813,7 @@ void loop() {
     }
   }
   if (dirty) drawScreen();
-  if (selectedTab == 0 && now - lastClockDraw >= 1000) { DrawRoomClock(); lastClockDraw = now; }
+  if (selectedTab == 0 && !panelId.isEmpty() && now - lastClockDraw >= 1000) { DrawRoomClock(); lastClockDraw = now; }
   else if (screenReady) drawStatus();
   if (screenReady && (selectedTab == 1 || selectedTab == 2) && now - lastTickerDraw >= 80) {
     drawTickers(now);
